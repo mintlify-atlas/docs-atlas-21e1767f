@@ -1,0 +1,181 @@
+{
+  "projectType": "framework",
+  "projectName": "Koog",
+  "projectDescription": "Kotlin multiplatform framework for building predictable, fault-tolerant and enterprise-ready AI agents across all platforms.",
+  "theme": "aspen",
+  "primaryColor": "#a237f7",
+  "lightColor": "#e73784",
+  "darkColor": "#040404",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/agents",
+              "concepts/strategies",
+              "concepts/tools",
+              "concepts/features",
+              "concepts/tool-registry",
+              "concepts/environment"
+            ]
+          },
+          {
+            "group": "Building Agents",
+            "pages": [
+              "guides/creating-your-first-agent",
+              "guides/adding-tools",
+              "guides/graph-workflows",
+              "guides/multi-agent-systems",
+              "guides/streaming",
+              "guides/testing-agents"
+            ]
+          },
+          {
+            "group": "LLM Providers",
+            "pages": [
+              "llm-providers/overview",
+              "llm-providers/openai",
+              "llm-providers/anthropic",
+              "llm-providers/google",
+              "llm-providers/ollama",
+              "llm-providers/openrouter",
+              "llm-providers/deepseek",
+              "llm-providers/bedrock"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/overview",
+              "features/memory",
+              "features/longterm-memory",
+              "features/event-handlers",
+              "features/tracing",
+              "features/opentelemetry",
+              "features/persistence",
+              "features/history-compression"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/model-context-protocol",
+              "integrations/agent-client-protocol",
+              "integrations/spring-boot",
+              "integrations/ktor",
+              "integrations/embeddings",
+              "integrations/rag"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/multiplatform",
+              "advanced/custom-features",
+              "advanced/observability",
+              "advanced/error-handling",
+              "advanced/performance"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core API",
+            "pages": [
+              "api/ai-agent",
+              "api/ai-agent-strategy",
+              "api/ai-agent-environment",
+              "api/prompt-executor"
+            ]
+          },
+          {
+            "group": "Tools API",
+            "pages": [
+              "api/tool",
+              "api/tool-registry",
+              "api/tool-descriptors"
+            ]
+          },
+          {
+            "group": "Features API",
+            "pages": [
+              "api/ai-agent-feature",
+              "api/ai-agent-pipeline"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Code Examples",
+            "pages": [
+              "examples/overview",
+              "examples/simple-agent",
+              "examples/code-agent",
+              "examples/trip-planning",
+              "examples/acp-agent",
+              "examples/spring-boot-integration"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multiplatform development (JVM, JS, WasmJS, Android, iOS)",
+    "Built-in reliability and fault-tolerance with retries and persistence",
+    "Intelligent history compression for token optimization",
+    "Enterprise integrations with Spring Boot and Ktor",
+    "OpenTelemetry support for observability",
+    "Multiple LLM provider support (OpenAI, Anthropic, Google, Ollama, etc.)",
+    "Type-safe Kotlin DSL for agent configuration",
+    "Model Context Protocol (MCP) integration",
+    "Agent Client Protocol (ACP) support",
+    "Advanced features: memory, RAG, embeddings",
+    "Graph-based workflows for complex agent behaviors",
+    "Comprehensive testing utilities",
+    "Streaming API with parallel tool calls"
+  ],
+  "publicApiSurface": [
+    "AIAgent",
+    "AIAgentStrategy",
+    "AIAgentEnvironment",
+    "Tool<TArgs, TResult>",
+    "ToolRegistry",
+    "PromptExecutor",
+    "simpleOpenAIExecutor",
+    "simpleAnthropicExecutor",
+    "simpleGoogleExecutor",
+    "simpleOllamaExecutor",
+    "singleRunStrategy",
+    "graphStrategy",
+    "OpenAIModels",
+    "AnthropicModels",
+    "GoogleModels",
+    "AIAgentFeature",
+    "handleEvents",
+    "memory",
+    "longtermMemory",
+    "trace",
+    "openTelemetry",
+    "snapshot",
+    "mcp",
+    "acp"
+  ]
+}
