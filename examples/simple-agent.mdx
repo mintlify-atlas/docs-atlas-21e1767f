@@ -1,0 +1,397 @@
+---
+title: 'Simple Agent Examples'
+description: 'A comprehensive collection of Koog agent examples from basic to advanced'
+icon: 'calculator'
+---
+
+The `simple-examples` directory contains over 30 runnable examples demonstrating various Koog framework capabilities. Each example is a complete, working implementation you can run and modify.
+
+## Getting Started
+
+### Setup
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone https://github.com/koogio/koog.git
+    cd koog/examples/simple-examples
+    ```
+  </Step>
+
+  <Step title="Set API Keys">
+    Create an `env.properties` file or export environment variables:
+    
+    ```bash
+    export OPENAI_API_KEY="your_openai_key"
+    export ANTHROPIC_API_KEY="your_anthropic_key"
+    ```
+  </Step>
+
+  <Step title="Run an Example">
+    Use Gradle tasks to run any example:
+    
+    ```bash
+    ./gradlew runExampleCalculator
+    ```
+  </Step>
+</Steps>
+
+## Core Examples
+
+### Calculator Agent
+
+A fundamental example demonstrating tool calling, event handling, and agent strategies.
+
+<CodeGroup>
+```kotlin Main Setup
+package ai.koog.agents.example.calculator
+
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.agent.config.AIAgentConfig
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.core.tools.reflect.asTools
+import ai.koog.agents.ext.tool.AskUser
+import ai.koog.agents.ext.tool.SayToUser
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+import ai.koog.prompt.dsl.prompt
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+
+suspend fun main() {
+    // Create a tool registry with calculator tools
+    val toolRegistry = ToolRegistry {
+        tool(AskUser)
+        tool(SayToUser)
+        tools(CalculatorTools().asTools())
+    }
+
+    // Create agent config with proper prompt
+    val agentConfig = AIAgentConfig(
+        prompt = prompt("test") {
+            system("You are a calculator.")
+        },
+        model = OpenAIModels.Chat.GPT4o,
+        maxAgentIterations = 50
+    )
+
+    simpleOpenAIExecutor(ApiKeyService.openAIApiKey).use { executor ->
+        val agent = AIAgent(
+            promptExecutor = executor,
+            strategy = CalculatorStrategy.strategy,
+            agentConfig = agentConfig,
+            toolRegistry = toolRegistry
+        ) {
+            handleEvents {
+                onToolCallStarting { eventContext ->
+                    println("Tool called: ${eventContext.toolName}")
+                }
+                onAgentCompleted { eventContext ->
+                    println("Result: ${eventContext.result}")
+                }
+            }
+        }
+
+        val result = agent.run("(10 + 20) * (5 + 5) / (2 - 11)")
+        println("Agent result: $result")
+    }
+}
+```
+
+```kotlin Calculator Tools
+@LLMDescription("Tools for basic calculator operations")
+class CalculatorTools : ToolSet {
+
+    @Tool
+    @LLMDescription("Adds two numbers")
+    fun plus(
+        @LLMDescription("First number") a: Float,
+        @LLMDescription("Second number") b: Float
+    ): String {
+        return (a + b).toString()
+    }
+
+    @Tool
+    @LLMDescription("Subtracts the second number from the first")
+    fun minus(
+        @LLMDescription("First number") a: Float,
+        @LLMDescription("Second number") b: Float
+    ): String {
+        return (a - b).toString()
+    }
+
+    @Tool
+    @LLMDescription("Multiplies two numbers")
+    fun multiply(
+        @LLMDescription("First number") a: Float,
+        @LLMDescription("Second number") b: Float
+    ): String {
+        return (a * b).toString()
+    }
+
+    @Tool
+    @LLMDescription("Divides the first number by the second")
+    fun divide(
+        @LLMDescription("First number") a: Float,
+        @LLMDescription("Second number") b: Float
+    ): String {
+        return (a / b).toString()
+    }
+}
+```
+
+```kotlin Strategy Definition
+object CalculatorStrategy {
+    private const val MAX_TOKENS_THRESHOLD = 1000
+
+    val strategy = strategy<String, String>("test") {
+        val nodeCallLLM by nodeLLMRequestMultiple()
+        val nodeExecuteToolMultiple by nodeExecuteMultipleTools(parallelTools = true)
+        val nodeSendToolResultMultiple by nodeLLMSendMultipleToolResults()
+        val nodeCompressHistory by nodeLLMCompressHistory<List<ReceivedToolResult>>()
+
+        edge(nodeStart forwardTo nodeCallLLM)
+
+        edge(
+            (nodeCallLLM forwardTo nodeFinish)
+                transformed { it.first() }
+                onAssistantMessage { true }
+        )
+
+        edge(
+            (nodeCallLLM forwardTo nodeExecuteToolMultiple)
+                onMultipleToolCalls { true }
+        )
+
+        edge(
+            (nodeExecuteToolMultiple forwardTo nodeCompressHistory)
+                onCondition { llm.readSession { prompt.latestTokenUsage > MAX_TOKENS_THRESHOLD } }
+        )
+
+        edge(nodeCompressHistory forwardTo nodeSendToolResultMultiple)
+
+        edge(
+            (nodeExecuteToolMultiple forwardTo nodeSendToolResultMultiple)
+                onCondition { llm.readSession { prompt.latestTokenUsage <= MAX_TOKENS_THRESHOLD } }
+        )
+
+        edge(
+            (nodeSendToolResultMultiple forwardTo nodeExecuteToolMultiple)
+                onMultipleToolCalls { true }
+        )
+
+        edge(
+            (nodeSendToolResultMultiple forwardTo nodeFinish)
+                transformed { it.first() }
+                onAssistantMessage { true }
+        )
+    }
+}
+```
+</CodeGroup>
+
+**Key Concepts:**
+- **Tool Registry**: Type-safe tool registration using annotations
+- **Agent Strategy**: Graph-based execution flow with nodes and edges
+- **Event Handling**: Observing tool calls and agent lifecycle events
+- **History Compression**: Automatic compression when token usage exceeds threshold
+
+**Run it:**
+```bash
+./gradlew runExampleCalculator
+```
+
+## Banking Agent with Routing
+
+Demonstrates complex routing between specialized sub-agents for different banking operations.
+
+**Features:**
+- Classifies user requests (balance inquiry, money transfer, transaction analysis)
+- Routes to specialized agents based on classification
+- Uses graph-based strategy for routing logic
+
+**Run it:**
+```bash
+./gradlew runExampleRoutingViaGraph
+```
+
+## Advanced Features
+
+### Streaming Responses
+
+Stream LLM responses in real-time while executing tools:
+
+```bash
+./gradlew runExampleStreamingWithTools
+```
+
+**Key Features:**
+- Real-time token streaming
+- Tool execution during streaming
+- HTTP server integration with Ktor
+
+### Structured Output
+
+Generate type-safe, schema-validated output from agents:
+
+```bash
+./gradlew runExampleStructuredOutputAdvancedWithStandardSchema
+```
+
+**Supports:**
+- JSON schemas for validation
+- Kotlin data class mapping
+- Streaming structured data
+- Markdown formatting with schemas
+
+### Memory and Persistence
+
+Agents that remember previous interactions:
+
+<Tabs>
+  <Tab title="File Persistence">
+    ```bash
+    ./gradlew runExampleFilePersistentAgent
+    ```
+    
+    Saves agent state to local files for session continuity.
+  </Tab>
+  
+  <Tab title="SQL Persistence">
+    ```bash
+    ./gradlew runExampleSQLPersistentAgent
+    ```
+    
+    Stores agent state in SQL database for production use.
+  </Tab>
+</Tabs>
+
+### Observability with OpenTelemetry
+
+Integrate comprehensive tracing and monitoring:
+
+```kotlin
+AIAgent(...) {
+    install(OpenTelemetry) {
+        setVerbose(true)
+        addLangfuseExporter(
+            traceAttributes = listOf(
+                CustomAttribute("langfuse.session.id", sessionId)
+            )
+        )
+    }
+}
+```
+
+**Run it:**
+```bash
+./gradlew runExampleFeatureOpenTelemetry
+```
+
+**Supported Integrations:**
+- Langfuse for trace visualization
+- Weights & Biases Weave
+- Custom OpenTelemetry exporters
+
+## External API Integration
+
+### AWS Bedrock
+
+Use AWS Bedrock models with Koog:
+
+```bash
+./gradlew runExampleBedrockAgent
+```
+
+### Web Search
+
+Agent with web search capabilities:
+
+```bash
+./gradlew runExampleWebSearchAgent
+```
+
+## Available Examples
+
+Here's a quick reference of all available Gradle tasks:
+
+<Accordion title="Core Examples (Click to expand)">
+  - `runExampleCalculator` - Basic calculator agent
+  - `runExampleCalculatorV2` - Enhanced calculator
+  - `runExampleCalculatorLocal` - Calculator with local LLM
+  - `runExampleGuesser` - Number guessing game
+  - `runExampleEssay` - Essay writing agent
+</Accordion>
+
+<Accordion title="Banking Examples">
+  - `runExampleRoutingViaGraph` - Banking with graph routing
+  - `runExampleRoutingViaAgentsAsTools` - Banking with agents as tools
+</Accordion>
+
+<Accordion title="Structured Output">
+  - `runExampleStructuredOutputSimple` - Basic structured output
+  - `runExampleStructuredOutputAdvancedWithBasicSchema` - Advanced basic schema
+  - `runExampleStructuredOutputAdvancedWithStandardSchema` - Advanced standard schema
+  - `runExampleMarkdownStreaming` - Streaming Markdown
+  - `runExampleMarkdownStreamingWithTool` - Streaming with tools
+</Accordion>
+
+<Accordion title="Streaming">
+  - `runExampleStreamingWithTools` - Streaming responses with tools
+  - `runExampleStreamingKtorServer` - HTTP server streaming
+</Accordion>
+
+<Accordion title="Persistence">
+  - `runExampleFilePersistentAgent` - File-based persistence
+  - `runExampleSQLPersistentAgent` - SQL database persistence
+</Accordion>
+
+<Accordion title="Observability">
+  - `runExampleFeatureOpenTelemetry` - OpenTelemetry tracing
+</Accordion>
+
+<Accordion title="External Integration">
+  - `runExampleBedrockAgent` - AWS Bedrock
+  - `runExampleWebSearchAgent` - Web search
+  - `runExampleInstagramPostDescriber` - Image attachments
+</Accordion>
+
+<Accordion title="Advanced">
+  - `runExampleJokesWithModeration` - Content moderation
+  - `runExampleExecSandbox` - Code execution sandbox
+  - `runExampleLoopComponent` - Loop-based generation
+  - `runExampleFleetProjectTemplateGeneration` - Fleet templates
+  - `runExampleRiderProjectTemplate` - Rider templates
+</Accordion>
+
+## Interactive Notebooks
+
+Many examples have corresponding Jupyter notebooks for interactive exploration:
+
+- **Calculator.ipynb** - Basic calculator with explanations
+- **Banking.ipynb** - Banking routing patterns
+- **Chess.ipynb** - Chess-playing agent
+- **OpenTelemetry.ipynb** - Observability setup
+- **Langfuse.ipynb** - Langfuse integration
+- **Weave.ipynb** - W&B Weave integration
+
+Find them in `examples/notebooks/` directory.
+
+## Source Code
+
+All examples are available on GitHub:
+
+<Card title="View on GitHub" icon="github" href="https://github.com/koogio/koog/tree/main/examples/simple-examples">
+  Browse the complete source code for all simple examples
+</Card>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Code Agent Tutorial" icon="terminal" href="/examples/code-agent">
+    Build a complete coding agent step-by-step
+  </Card>
+  
+  <Card title="Core Concepts" icon="book" href="/core-concepts/agents">
+    Learn more about Koog's architecture
+  </Card>
+</CardGroup>

@@ -1,0 +1,535 @@
+---
+title: "Environment"
+description: "Understanding AIAgentEnvironment - safe tool execution and context isolation"
+---
+
+## Overview
+
+The `AIAgentEnvironment` provides a safe, controlled context for executing tools within an agent. It acts as a protective layer that ensures tools are executed properly, errors are handled gracefully, and the agent's execution pipeline remains intact.
+
+## Why Environment?
+
+Direct tool execution bypasses critical infrastructure:
+
+```kotlin
+// ❌ WRONG: Direct tool call
+val result = myTool.execute(args)
+// - No event notifications
+// - No feature pipeline
+// - No error handling
+// - Can't be mocked in tests
+
+// ✅ CORRECT: Through environment
+val toolCall = Message.Tool.Call(
+    name = myTool.name,
+    arguments = args
+)
+val result = context.environment.executeTool(toolCall)
+// - Events fired
+// - Features intercept
+// - Errors handled
+// - Mockable in tests
+```
+
+## Environment Interface
+
+```kotlin
+public interface AIAgentEnvironment {
+    /**
+     * Executes a tool call and returns its result
+     */
+    public suspend fun executeTool(
+        toolCall: Message.Tool.Call
+    ): ReceivedToolResult
+    
+    /**
+     * Executes multiple tool calls
+     */
+    public suspend fun executeTools(
+        toolCalls: List<Message.Tool.Call>
+    ): List<ReceivedToolResult>
+    
+    /**
+     * Reports a problem that occurred during execution
+     */
+    public suspend fun reportProblem(exception: Throwable)
+}
+```
+
+## Tool Execution
+
+### Single Tool Execution
+
+Execute one tool at a time:
+
+```kotlin
+val strategy = strategy<String, String>("custom") {
+    val executeTool by node<Message.Tool.Call, ReceivedToolResult> { toolCall ->
+        // Execute through environment
+        environment.executeTool(toolCall)
+    }
+    
+    nodeStart then executeTool then nodeFinish
+}
+```
+
+### Batch Tool Execution
+
+Execute multiple tools with automatic parallelization:
+
+```kotlin
+val strategy = strategy<String, String>("batch") {
+    val executeTools by node<List<Message.Tool.Call>, List<ReceivedToolResult>> { toolCalls ->
+        // Executes tools in supervisorScope
+        environment.executeTools(toolCalls)
+    }
+    
+    nodeStart then executeTools then nodeFinish
+}
+```
+
+<Note>
+The `executeTools` method uses `supervisorScope` and `async` to execute tools in parallel while ensuring that one tool's failure doesn't cancel the others.
+</Note>
+
+### Behind the Scenes
+
+When you call `environment.executeTool(toolCall)`:
+
+1. **Feature Pipeline Notification**: "Tool call starting" event
+2. **Argument Validation**: Tool arguments are validated
+3. **Argument Decoding**: JSON arguments decoded to typed objects
+4. **Tool Execution**: The tool's `execute` method is called
+5. **Result Encoding**: Result encoded back to JSON
+6. **Feature Pipeline Notification**: "Tool call completed" event
+7. **Result Return**: Wrapped result returned to caller
+
+## Tool Call Messages
+
+The environment works with `Message.Tool.Call` objects:
+
+```kotlin
+data class Message.Tool.Call(
+    val id: String,              // Unique call ID
+    val name: String,            // Tool name
+    val arguments: JsonObject,   // Tool arguments as JSON
+    val metadata: Map<String, String> = emptyMap()
+)
+```
+
+Creating tool calls:
+
+```kotlin
+// From LLM response
+val llmResponse = context.llm.call(input)
+val toolCalls = llmResponse.toolCalls  // List<Message.Tool.Call>
+
+// Manually
+val toolCall = Message.Tool.Call(
+    id = UUID.randomUUID().toString(),
+    name = "search",
+    arguments = buildJsonObject {
+        put("query", "kotlin")
+        put("maxResults", 10)
+    }
+)
+```
+
+## Tool Results
+
+The environment returns `ReceivedToolResult` objects:
+
+```kotlin
+data class ReceivedToolResult(
+    val toolName: String,
+    val id: String,
+    val content: String,         // Serialized result
+    val metadata: Map<String, String> = emptyMap(),
+    val error: String? = null    // Error message if failed
+)
+```
+
+Using results:
+
+```kotlin
+val result = environment.executeTool(toolCall)
+
+if (result.error != null) {
+    println("Tool failed: ${result.error}")
+} else {
+    println("Tool returned: ${result.content}")
+}
+```
+
+## Error Handling
+
+### Tool Execution Errors
+
+The environment catches and wraps tool execution errors:
+
+```kotlin
+val result = environment.executeTool(toolCall)
+
+when {
+    result.error != null -> {
+        // Tool execution failed
+        logger.error("Tool ${result.toolName} failed: ${result.error}")
+        // Environment already notified features
+    }
+    else -> {
+        // Tool succeeded
+        processResult(result.content)
+    }
+}
+```
+
+### Reporting Problems
+
+For critical errors that should stop agent execution:
+
+```kotlin
+val strategy = strategy<String, String>("resilient") {
+    val process by node<String, String> { input ->
+        try {
+            processInput(input)
+        } catch (e: CriticalException) {
+            // Report to environment
+            environment.reportProblem(e)
+            throw e  // Re-throw to stop execution
+        }
+    }
+    
+    nodeStart then process then nodeFinish
+}
+```
+
+## Context Isolation
+
+The environment provides context isolation between agent executions:
+
+### Session Isolation
+
+Each agent session gets its own environment instance:
+
+```kotlin
+val session1 = agent.createSession()
+val session2 = agent.createSession()
+
+// session1.environment != session2.environment
+// Tool calls in session1 don't affect session2
+```
+
+### Storage Isolation
+
+Environments are separate from storage:
+
+```kotlin
+val strategy = strategy<String, String>("isolated") {
+    val key = createStorageKey<Int>("counter")
+    
+    val increment by node<Unit, Int> {
+        val current = storage.get(key) ?: 0
+        val next = current + 1
+        storage.set(key, next)
+        next
+    }
+    
+    // Storage is per-session
+    // Environment is per-session
+    // They're isolated but coordinated
+}
+```
+
+## Environment in Different Contexts
+
+### In Graph Strategies
+
+Access through `AIAgentGraphContext`:
+
+```kotlin
+val strategy = strategy<String, String>("graph") {
+    val customNode by node<String, String> { input ->
+        // environment is available here
+        val toolCall = createToolCall(input)
+        val result = environment.executeTool(toolCall)
+        result.content
+    }
+    
+    nodeStart then customNode then nodeFinish
+}
+```
+
+### In Functional Strategies
+
+Access through `AIAgentFunctionalContext`:
+
+```kotlin
+val functionalStrategy = object : AIAgentFunctionalStrategy<String, String> {
+    override val name = "functional"
+    
+    override suspend fun execute(
+        context: AIAgentFunctionalContext,
+        input: String
+    ): String {
+        val toolCall = createToolCall(input)
+        val result = context.environment.executeTool(toolCall)
+        return result.content
+    }
+}
+```
+
+### In Custom Nodes
+
+Custom nodes receive the full context:
+
+```kotlin
+class CustomNode : AIAgentNode<String, String>() {
+    override suspend fun execute(
+        context: AIAgentContext,
+        input: String
+    ): String {
+        val toolCall = parseToolCall(input)
+        val result = context.environment.executeTool(toolCall)
+        return formatResult(result)
+    }
+}
+```
+
+## Built-In Nodes Using Environment
+
+Koog provides several built-in nodes that use the environment:
+
+### nodeExecuteTool
+
+Executes a single tool call:
+
+```kotlin
+val strategy = strategy("single-tool") {
+    val executeTool by nodeExecuteTool()
+    
+    nodeStart then executeTool then nodeFinish
+}
+
+// Input: Message.Tool.Call
+// Output: ReceivedToolResult
+```
+
+### nodeExecuteMultipleTools
+
+Executes multiple tool calls:
+
+```kotlin
+val strategy = strategy("multi-tool") {
+    val executeTools by nodeExecuteMultipleTools(
+        parallelTools = true  // Execute in parallel
+    )
+    
+    nodeStart then executeTools then nodeFinish
+}
+
+// Input: List<Message.Tool.Call>
+// Output: List<ReceivedToolResult>
+```
+
+## Environment and Features
+
+Features can intercept tool execution through the environment:
+
+```kotlin
+class TimingFeature : AIAgentGraphFeature<FeatureConfig, TimingFeature> {
+    override fun install(
+        config: FeatureConfig,
+        pipeline: AIAgentGraphPipeline
+    ): TimingFeature {
+        pipeline.interceptToolCallStarting(this) { ctx ->
+            ctx.startTime = Clock.System.now()
+        }
+        
+        pipeline.interceptToolCallCompleted(this) { ctx ->
+            val duration = Clock.System.now() - ctx.startTime
+            println("Tool ${ctx.tool.name} took $duration")
+        }
+        
+        return this
+    }
+}
+```
+
+## Testing with Environment
+
+### Mocking Tool Execution
+
+The environment makes tool mocking possible:
+
+```kotlin
+val mockExecutor = getMockExecutor(toolRegistry, eventHandler) {
+    // Mock LLM to request tool
+    mockLLMToolCall(
+        SearchTool,
+        SearchTool.Args("kotlin")
+    ) onRequestContains "search"
+    
+    // Mock tool execution through environment
+    mockTool(SearchTool) returns SearchTool.Result(
+        items = listOf("result1", "result2")
+    )
+}
+
+val agent = AIAgent(
+    promptExecutor = mockExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = toolRegistry
+)
+
+val result = agent.run("search for kotlin")
+// Tool executed through environment
+// Mock intercepts execution
+```
+
+### Verifying Tool Calls
+
+Test that tools were called correctly:
+
+```kotlin
+@Test
+fun testToolExecution() = runTest {
+    val toolCalls = mutableListOf<String>()
+    
+    val agent = AIAgent(...) {
+        handleEvents {
+            onToolCallStarting { ctx ->
+                toolCalls.add(ctx.tool.name)
+            }
+        }
+    }
+    
+    agent.run(input)
+    
+    assertEquals(listOf("search", "process"), toolCalls)
+}
+```
+
+## Best Practices
+
+### Always Use Environment
+
+<Warning>
+**Critical Rule**: Never call tools directly in production code.
+
+```kotlin
+// ❌ NEVER do this
+val myTool = toolRegistry.getTool<MyTool>()
+val result = myTool.execute(args)
+
+// ✅ ALWAYS do this
+val toolCall = Message.Tool.Call(
+    name = "myTool",
+    arguments = encodeArgs(args)
+)
+val result = context.environment.executeTool(toolCall)
+```
+</Warning>
+
+### Error Handling
+
+```kotlin
+// ✅ Handle tool errors gracefully
+val result = environment.executeTool(toolCall)
+
+if (result.error != null) {
+    // Decide whether to:
+    // 1. Continue with partial results
+    // 2. Retry the tool
+    // 3. Report problem and stop
+    when {
+        result.error.contains("rate limit") -> retryLater()
+        result.error.contains("not found") -> continueWithout()
+        else -> environment.reportProblem(Exception(result.error))
+    }
+}
+```
+
+### Parallel Execution
+
+```kotlin
+// ✅ Use executeTools for parallel execution
+val results = environment.executeTools(toolCalls)
+// Automatically parallelized with supervisorScope
+
+// ❌ Don't manually parallelize
+val results = coroutineScope {
+    toolCalls.map { async { environment.executeTool(it) } }.awaitAll()
+}
+// Unnecessary and potentially less safe
+```
+
+## Advanced Patterns
+
+### Conditional Tool Execution
+
+```kotlin
+val strategy = strategy<String, String>("conditional") {
+    val analyze by nodeLLMRequest()
+    
+    val executeTool by node<Message.Tool.Call, String> { toolCall ->
+        // Only execute if conditions are met
+        if (shouldExecute(toolCall)) {
+            val result = environment.executeTool(toolCall)
+            result.content
+        } else {
+            "Tool execution skipped"
+        }
+    }
+    
+    nodeStart then analyze then executeTool then nodeFinish
+}
+```
+
+### Tool Result Transformation
+
+```kotlin
+val transform by node<ReceivedToolResult, String> { result ->
+    when {
+        result.error != null -> "Error: ${result.error}"
+        result.content.isEmpty() -> "No results"
+        else -> formatForLLM(result.content)
+    }
+}
+```
+
+### Retry Logic
+
+```kotlin
+val retryTool by node<Message.Tool.Call, ReceivedToolResult> { toolCall ->
+    var attempts = 0
+    var result: ReceivedToolResult
+    
+    do {
+        attempts++
+        result = environment.executeTool(toolCall)
+        
+        if (result.error != null && attempts < 3) {
+            delay(1000 * attempts)  // Exponential backoff
+        }
+    } while (result.error != null && attempts < 3)
+    
+    result
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tools" icon="wrench" href="/concepts/tools">
+    Learn about creating tools
+  </Card>
+  <Card title="Strategies" icon="diagram-project" href="/concepts/strategies">
+    Use environment in strategies
+  </Card>
+  <Card title="Features" icon="puzzle-piece" href="/concepts/features">
+    Intercept tool execution
+  </Card>
+  <Card title="Testing" icon="flask" href="/testing/overview">
+    Test with mocked environment
+  </Card>
+</CardGroup>

@@ -1,0 +1,564 @@
+---
+title: Tracing
+description: Comprehensive execution tracing for debugging and analysis
+---
+
+The Tracing feature collects detailed information during agent execution and sends it to configured message processors for logging, file storage, or remote analysis. This is essential for debugging, evaluation, and understanding agent behavior.
+
+## What is Tracing?
+
+Tracing captures comprehensive data about:
+
+- **LLM interactions**: All prompts sent and responses received
+- **Tool execution**: Tool calls, arguments, and results
+- **Graph navigation**: Node visits and execution flow
+- **Agent lifecycle**: Start, finish, and error events
+- **Strategy execution**: Strategy-level events and results
+- **Streaming**: Frame-by-frame streaming data
+
+## Installation
+
+```kotlin
+import ai.koog.agents.features.tracing.feature.Tracing
+import ai.koog.agents.features.tracing.writer.TraceFeatureMessageLogWriter
+import ai.koog.agents.features.tracing.writer.TraceFeatureMessageFileWriter
+
+val agent = AIAgent(
+    executor = myExecutor,
+    strategy = myStrategy
+) {
+    install(Tracing) {
+        // Log to console
+        addMessageProcessor(TraceFeatureMessageLogWriter(logger))
+        
+        // Write to file
+        val fileWriter = TraceFeatureMessageFileWriter(
+            outputFile = Path("traces/agent-trace.jsonl"),
+            sinkProvider = { path -> SystemFileSystem.sink(path).buffered() }
+        )
+        addMessageProcessor(fileWriter)
+    }
+}
+```
+
+## Message Processors
+
+Tracing uses message processors to handle captured events:
+
+### Log Writer
+
+Write trace events to logs:
+
+```kotlin
+import io.github.oshai.kotlinlogging.KotlinLogging
+
+val logger = KotlinLogging.logger {}
+
+addMessageProcessor(TraceFeatureMessageLogWriter(logger))
+```
+
+### File Writer
+
+Write trace events to a file in JSONL format:
+
+```kotlin
+import okio.Path.Companion.toPath
+import okio.FileSystem
+
+val fileWriter = TraceFeatureMessageFileWriter(
+    outputFile = "traces/run-${runId}.jsonl".toPath(),
+    sinkProvider = { path ->
+        FileSystem.SYSTEM.sink(path).buffered()
+    }
+)
+
+addMessageProcessor(fileWriter)
+```
+
+### Remote Writer
+
+Send trace events to a remote endpoint:
+
+```kotlin
+import ai.koog.agents.features.tracing.writer.TraceFeatureMessageRemoteWriter
+import io.ktor.client.HttpClient
+
+val remoteWriter = TraceFeatureMessageRemoteWriter(
+    httpClient = HttpClient(),
+    endpoint = "https://analytics.example.com/traces"
+)
+
+addMessageProcessor(remoteWriter)
+```
+
+### Custom Processor
+
+Implement your own message processor:
+
+```kotlin
+import ai.koog.agents.core.feature.message.FeatureMessageProcessor
+import ai.koog.agents.core.feature.message.FeatureMessage
+
+class MyTraceProcessor : FeatureMessageProcessor {
+    override suspend fun processMessage(message: FeatureMessage) {
+        when (message) {
+            is LLMCallStartingEvent -> {
+                // Handle LLM call events
+                println("LLM called with prompt: ${message.prompt}")
+            }
+            is ToolCallCompletedEvent -> {
+                // Handle tool events
+                database.saveTool Call(message)
+            }
+            // Handle other event types...
+        }
+    }
+}
+
+addMessageProcessor(MyTraceProcessor())
+```
+
+## Filtering Events
+
+Filter which events are processed:
+
+```kotlin
+val fileWriter = TraceFeatureMessageFileWriter(outputFile, sinkProvider)
+
+// Only trace LLM and tool events
+fileWriter.setMessageFilter { message ->
+    message is LLMCallStartingEvent ||
+    message is LLMCallCompletedEvent ||
+    message is ToolCallStartingEvent ||
+    message is ToolCallCompletedEvent
+}
+
+addMessageProcessor(fileWriter)
+```
+
+## Trace Event Types
+
+### Agent Events
+
+```kotlin
+// Agent starting
+AgentStartingEvent(
+    agentId: String,
+    runId: String,
+    timestamp: Long
+)
+
+// Agent completed
+AgentCompletedEvent(
+    agentId: String,
+    runId: String,
+    result: String?,
+    timestamp: Long
+)
+
+// Agent failed
+AgentExecutionFailedEvent(
+    agentId: String,
+    runId: String,
+    error: AgentError,
+    timestamp: Long
+)
+
+// Agent closing
+AgentClosingEvent(
+    agentId: String,
+    timestamp: Long
+)
+```
+
+### Strategy Events
+
+```kotlin
+// Strategy starting
+GraphStrategyStartingEvent(
+    runId: String,
+    strategyName: String,
+    graph: Graph,  // Complete strategy graph structure
+    timestamp: Long
+)
+
+// Strategy completed
+StrategyCompletedEvent(
+    runId: String,
+    strategyName: String,
+    result: String?,
+    timestamp: Long
+)
+```
+
+### Node Events
+
+```kotlin
+// Node execution starting
+NodeExecutionStartingEvent(
+    runId: String,
+    nodeName: String,
+    input: JsonElement,
+    timestamp: Long
+)
+
+// Node execution completed
+NodeExecutionCompletedEvent(
+    runId: String,
+    nodeName: String,
+    input: JsonElement,
+    output: JsonElement,
+    timestamp: Long
+)
+
+// Node execution failed
+NodeExecutionFailedEvent(
+    runId: String,
+    nodeName: String,
+    input: JsonElement,
+    error: AgentError,
+    timestamp: Long
+)
+```
+
+### Subgraph Events
+
+```kotlin
+// Subgraph starting
+SubgraphExecutionStartingEvent(
+    runId: String,
+    subgraphName: String,
+    input: JsonElement,
+    timestamp: Long
+)
+
+// Subgraph completed
+SubgraphExecutionCompletedEvent(
+    runId: String,
+    subgraphName: String,
+    input: JsonElement,
+    output: JsonElement,
+    timestamp: Long
+)
+
+// Subgraph failed
+SubgraphExecutionFailedEvent(
+    runId: String,
+    subgraphName: String,
+    input: JsonElement,
+    error: AgentError,
+    timestamp: Long
+)
+```
+
+### LLM Events
+
+```kotlin
+// LLM call starting
+LLMCallStartingEvent(
+    runId: String,
+    prompt: Prompt,
+    model: ModelInfo,
+    tools: List<String>,
+    timestamp: Long
+)
+
+// LLM call completed
+LLMCallCompletedEvent(
+    runId: String,
+    prompt: Prompt,
+    model: ModelInfo,
+    responses: List<Message.Response>,
+    moderationResponse: ModerationResponse?,
+    timestamp: Long
+)
+```
+
+### Streaming Events
+
+```kotlin
+// Streaming starting
+LLMStreamingStartingEvent(
+    runId: String,
+    prompt: Prompt,
+    model: ModelInfo,
+    tools: List<String>,
+    timestamp: Long
+)
+
+// Frame received
+LLMStreamingFrameReceivedEvent(
+    runId: String,
+    prompt: Prompt,
+    model: ModelInfo,
+    frame: StreamFrame,
+    timestamp: Long
+)
+
+// Streaming completed
+LLMStreamingCompletedEvent(
+    runId: String,
+    prompt: Prompt,
+    model: ModelInfo,
+    tools: List<String>,
+    timestamp: Long
+)
+
+// Streaming failed
+LLMStreamingFailedEvent(
+    runId: String,
+    prompt: Prompt,
+    model: ModelInfo,
+    error: AgentError,
+    timestamp: Long
+)
+```
+
+### Tool Events
+
+```kotlin
+// Tool call starting
+ToolCallStartingEvent(
+    runId: String,
+    toolCallId: String,
+    toolName: String,
+    toolArgs: String,
+    timestamp: Long
+)
+
+// Tool validation failed
+ToolValidationFailedEvent(
+    runId: String,
+    toolCallId: String,
+    toolName: String,
+    toolArgs: String,
+    toolDescription: String,
+    message: String,
+    error: String?,
+    timestamp: Long
+)
+
+// Tool call failed
+ToolCallFailedEvent(
+    runId: String,
+    toolCallId: String,
+    toolName: String,
+    toolArgs: String,
+    toolDescription: String,
+    error: String,
+    timestamp: Long
+)
+
+// Tool call completed
+ToolCallCompletedEvent(
+    runId: String,
+    toolCallId: String,
+    toolName: String,
+    toolArgs: String,
+    toolDescription: String,
+    result: String,
+    timestamp: Long
+)
+```
+
+## Example Trace Output
+
+Example of events in a trace file:
+
+```json
+{"eventType":"AgentStartingEvent","agentId":"agent-123","runId":"run-456","timestamp":1678901234567}
+{"eventType":"GraphStrategyStartingEvent","runId":"run-456","strategyName":"code-analyzer","graph":{...}}
+{"eventType":"NodeExecutionStartingEvent","runId":"run-456","nodeName":"analyzeCode","input":"fun main() {...}"}
+{"eventType":"LLMCallStartingEvent","runId":"run-456","model":{"id":"gpt-4o"},"prompt":{...}}
+{"eventType":"LLMCallCompletedEvent","runId":"run-456","responses":[{"content":"Analysis: ..."}]}
+{"eventType":"NodeExecutionCompletedEvent","runId":"run-456","nodeName":"analyzeCode","output":"Analysis: ..."}
+{"eventType":"StrategyCompletedEvent","runId":"run-456","result":"Success"}
+{"eventType":"AgentCompletedEvent","agentId":"agent-123","runId":"run-456","result":"Analysis: ..."}
+```
+
+## Use Cases
+
+### Debugging Agent Execution
+
+```kotlin
+install(Tracing) {
+    val debugLogger = KotlinLogging.logger { }
+    
+    addMessageProcessor(TraceFeatureMessageLogWriter(debugLogger))
+    
+    // Only log errors and failures
+    addMessageProcessor(object : FeatureMessageProcessor {
+        override suspend fun processMessage(message: FeatureMessage) {
+            when (message) {
+                is NodeExecutionFailedEvent -> {
+                    debugLogger.error { "Node ${message.nodeName} failed: ${message.error}" }
+                }
+                is ToolCallFailedEvent -> {
+                    debugLogger.error { "Tool ${message.toolName} failed: ${message.error}" }
+                }
+                is AgentExecutionFailedEvent -> {
+                    debugLogger.error { "Agent failed: ${message.error}" }
+                }
+            }
+        }
+    })
+}
+```
+
+### Performance Analysis
+
+```kotlin
+class PerformanceAnalyzer : FeatureMessageProcessor {
+    private val nodeTimings = mutableMapOf<String, Long>()
+    private val nodeStarts = mutableMapOf<String, Long>()
+    
+    override suspend fun processMessage(message: FeatureMessage) {
+        when (message) {
+            is NodeExecutionStartingEvent -> {
+                nodeStarts[message.nodeName] = message.timestamp
+            }
+            is NodeExecutionCompletedEvent -> {
+                val start = nodeStarts[message.nodeName] ?: return
+                val duration = message.timestamp - start
+                nodeTimings[message.nodeName] = duration
+            }
+            is AgentCompletedEvent -> {
+                println("\nPerformance Report:")
+                nodeTimings.forEach { (name, duration) ->
+                    println("  $name: ${duration}ms")
+                }
+            }
+        }
+    }
+}
+
+install(Tracing) {
+    addMessageProcessor(PerformanceAnalyzer())
+}
+```
+
+### Execution Replay
+
+Save traces for later replay:
+
+```kotlin
+// Save during execution
+install(Tracing) {
+    addMessageProcessor(
+        TraceFeatureMessageFileWriter(
+            outputFile = Path("traces/execution-${runId}.jsonl"),
+            sinkProvider = { path -> FileSystem.SYSTEM.sink(path).buffered() }
+        )
+    )
+}
+
+// Later: replay the execution
+val traces = File("traces/execution-123.jsonl").readLines()
+traces.forEach { line ->
+    val event = Json.decodeFromString<FeatureMessage>(line)
+    replayEvent(event)
+}
+```
+
+## Complete Example
+
+```kotlin
+import ai.koog.agents.core.dsl.graphStrategy
+import ai.koog.agents.features.tracing.feature.Tracing
+import ai.koog.agents.features.tracing.writer.*
+import io.github.oshai.kotlinlogging.KotlinLogging
+
+val logger = KotlinLogging.logger {}
+val runId = "run-${System.currentTimeMillis()}"
+
+val agent = AIAgent(
+    executor = openAIExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = graphStrategy {
+        val analyze by node<String, String> { code ->
+            requestLLM("Analyze this code: $code")
+        }
+        
+        edges {
+            start goesTo analyze
+            analyze goesTo finish
+        }
+    }
+) {
+    install(Tracing) {
+        // Console logging
+        addMessageProcessor(TraceFeatureMessageLogWriter(logger))
+        
+        // File storage
+        val fileWriter = TraceFeatureMessageFileWriter(
+            outputFile = Path("traces/$runId.jsonl"),
+            sinkProvider = { FileSystem.SYSTEM.sink(it).buffered() }
+        )
+        
+        // Filter: only save LLM and tool events to file
+        fileWriter.setMessageFilter { message ->
+            message is LLMCallStartingEvent ||
+            message is LLMCallCompletedEvent ||
+            message is ToolCallStartingEvent ||
+            message is ToolCallCompletedEvent
+        }
+        
+        addMessageProcessor(fileWriter)
+        
+        // Custom analytics
+        addMessageProcessor(object : FeatureMessageProcessor {
+            override suspend fun processMessage(message: FeatureMessage) {
+                when (message) {
+                    is LLMCallCompletedEvent -> {
+                        analyticsService.trackLLMCall(
+                            model = message.model.id,
+                            tokenCount = message.responses.sumOf { it.content.length }
+                        )
+                    }
+                }
+            }
+        })
+    }
+}
+
+val result = agent.run("fun main() { println(\"Hello\") }")
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use filtering in production">
+    Don't trace everything in production. Filter to only capture important events to reduce overhead and storage.
+  </Accordion>
+  
+  <Accordion title="Separate trace files by run">
+    Use unique file names per run (include runId or timestamp) to avoid overwriting traces.
+  </Accordion>
+  
+  <Accordion title="Implement rotation">
+    Set up log rotation for trace files to prevent disk space issues.
+  </Accordion>
+  
+  <Accordion title="Combine with metrics">
+    Use tracing for detailed debugging and metrics for high-level monitoring.
+  </Accordion>
+  
+  <Accordion title="Handle sensitive data">
+    Filter or redact sensitive information from traces before writing to storage.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  **Performance**: Comprehensive tracing can generate large volumes of data and impact performance. Use filtering and sampling appropriately.
+</Warning>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Event Handlers" icon="webhook" href="/features/event-handlers">
+    Lightweight event hooks for custom logic
+  </Card>
+  <Card title="OpenTelemetry" icon="tower-broadcast" href="/features/opentelemetry">
+    Industry-standard distributed tracing and observability
+  </Card>
+</CardGroup>

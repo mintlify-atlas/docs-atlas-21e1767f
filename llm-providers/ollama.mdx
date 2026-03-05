@@ -1,0 +1,468 @@
+---
+title: Ollama Provider
+description: Run open-source LLMs locally with Ollama for free, private AI development
+---
+
+Ollama enables you to run open-source large language models locally on your machine. Perfect for development, experimentation, and applications requiring data privacy.
+
+## Installation
+
+### Install Ollama
+
+First, install Ollama on your system:
+
+```bash
+# macOS
+brew install ollama
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Windows
+# Download from https://ollama.com/download
+```
+
+### Start Ollama Server
+
+```bash
+ollama serve
+```
+
+The server runs on `http://localhost:11434` by default.
+
+### Pull a Model
+
+```bash
+# Pull a model
+ollama pull llama3.2
+
+# List available models
+ollama list
+```
+
+## Quick Start
+
+```kotlin
+import ai.koog.prompt.executor.ollama.client.*
+import ai.koog.agents.core.*
+
+val executor = simpleOllamaExecutor(
+    baseUrl = "http://localhost:11434",
+    model = OllamaModels.Meta.LLAMA_3_2
+)
+
+val agent = AIAgent(
+    executor = executor,
+    tools = toolRegistry {
+        // Your tools here
+    }
+) {
+    // Define your agent strategy
+}
+
+val result = agent.execute("Hello, Ollama!")
+```
+
+## Available Models
+
+### Meta Llama Series
+
+Meta's open-source models with strong performance.
+
+```kotlin
+OllamaModels.Meta.LLAMA_3_2         // Latest, 131K context
+OllamaModels.Meta.LLAMA_3_2_3B      // Smaller variant
+OllamaModels.Meta.LLAMA_4_SCOUT     // Next-gen, 10M context
+OllamaModels.Meta.LLAMA_GUARD_3     // Content moderation
+```
+
+### Alibaba Qwen Series
+
+High-quality multilingual models.
+
+```kotlin
+OllamaModels.Alibaba.QWEN_2_5_05B   // Very small, fast
+OllamaModels.Alibaba.QWEN_3_06B     // Balanced
+OllamaModels.Alibaba.QWQ_32B        // Large, capable
+OllamaModels.Alibaba.QWEN_CODER_2_5_32B // Code-specialized
+```
+
+### Groq Llama Tool Use
+
+Optimized for function calling.
+
+```kotlin
+OllamaModels.Groq.LLAMA_3_GROK_TOOL_USE_8B   // Fast tool calling
+OllamaModels.Groq.LLAMA_3_GROK_TOOL_USE_70B  // Large tool calling
+```
+
+### Granite Vision
+
+Multimodal model with vision capabilities.
+
+```kotlin
+OllamaModels.Granite.GRANITE_3_2_VISION   // Vision + document support
+```
+
+### DeepSeek Reasoning
+
+Models with extended reasoning capabilities.
+
+```kotlin
+OllamaModels.DeepSeek.DEEPSEEK_R1_DISTILL_LLAMA_1_5B // Thinking traces
+```
+
+### Embedding Models
+
+```kotlin
+OllamaModels.Embeddings.NOMIC_EMBED_TEXT     // General-purpose
+OllamaModels.Embeddings.ALL_MINI_LM          // Lightweight
+OllamaModels.Embeddings.MULTILINGUAL_E5      // 100+ languages
+OllamaModels.Embeddings.BGE_LARGE            // High-quality English
+OllamaModels.Embeddings.MXBAI_EMBED_LARGE    // Large embeddings
+```
+
+## Code Examples
+
+### Basic Chat Completion
+
+```kotlin
+val client = OllamaClient(
+    baseUrl = "http://localhost:11434"
+)
+
+val executor = simpleOllamaExecutor(
+    client = client,
+    model = OllamaModels.Meta.LLAMA_3_2
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user("What is the capital of France?")
+    }
+)
+
+println(result.first().content)
+```
+
+### Function Calling
+
+```kotlin
+data class WeatherArgs(val city: String)
+
+val weatherTool = tool<WeatherArgs, String>(
+    name = "get_weather",
+    description = "Get weather for a city"
+) { args ->
+    "Sunny, 22°C in ${args.city}"
+}
+
+val agent = AIAgent(
+    executor = simpleOllamaExecutor(
+        baseUrl = "http://localhost:11434",
+        model = OllamaModels.Groq.LLAMA_3_GROK_TOOL_USE_8B // Tool-optimized
+    ),
+    tools = toolRegistry { tool(weatherTool) }
+) {
+    defineGraph<String, String>("weather-agent") {
+        val response = callLLM()
+        finish(response)
+    }
+}
+
+val result = agent.execute("What's the weather in Tokyo?")
+```
+
+### Vision - Image Analysis
+
+```kotlin
+val executor = simpleOllamaExecutor(
+    baseUrl = "http://localhost:11434",
+    model = OllamaModels.Granite.GRANITE_3_2_VISION
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user {
+            text("Describe this image")
+            image(
+                bytes = File("photo.jpg").readBytes(),
+                mimeType = "image/jpeg"
+            )
+        }
+    }
+)
+```
+
+### Structured Output
+
+```kotlin
+@Serializable
+data class Person(val name: String, val age: Int)
+
+val executor = simpleOllamaExecutor(
+    baseUrl = "http://localhost:11434",
+    model = OllamaModels.Alibaba.QWEN_3_06B,
+    params = OllamaParams(
+        schema = LLMParams.Schema.JSON.Basic(
+            name = "Person",
+            schema = /* JSON schema */
+        )
+    )
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user("Extract: Alice, 30 years old")
+    }
+)
+
+val person = Json.decodeFromString<Person>(result.first().content)
+```
+
+### Streaming Responses
+
+```kotlin
+val executor = simpleOllamaExecutor(
+    baseUrl = "http://localhost:11434",
+    model = OllamaModels.Meta.LLAMA_3_2
+)
+
+executor.executeStreaming(
+    prompt = prompt { user("Tell me a story") }
+).collect { frame ->
+    when (frame) {
+        is StreamFrame.TextDelta -> print(frame.text)
+        is StreamFrame.ReasoningDelta -> print("[Thinking: ${frame.text}]")
+        is StreamFrame.End -> println("\nDone!")
+        else -> {}
+    }
+}
+```
+
+### Embeddings
+
+```kotlin
+val client = OllamaClient(
+    baseUrl = "http://localhost:11434"
+)
+
+val embedding = client.embed(
+    text = "The quick brown fox jumps over the lazy dog",
+    model = OllamaModels.Embeddings.NOMIC_EMBED_TEXT
+)
+
+println("Embedding dimensions: ${embedding.size}")
+```
+
+### Content Moderation
+
+```kotlin
+val client = OllamaClient(
+    baseUrl = "http://localhost:11434"
+)
+
+val result = client.moderate(
+    prompt = prompt { user("Some potentially harmful content") },
+    model = OllamaModels.Meta.LLAMA_GUARD_3
+)
+
+if (result.isHarmful) {
+    println("Content flagged: ${result.categories}")
+}
+```
+
+### Dynamic Model Loading
+
+Load models on-demand:
+
+```kotlin
+val client = OllamaClient(
+    baseUrl = "http://localhost:11434"
+)
+
+// Pull model if not available
+val modelCard = client.getModelOrNull(
+    name = "llama3.2",
+    pullIfMissing = true // Automatically download if needed
+)
+
+if (modelCard != null) {
+    println("Model loaded: ${modelCard.name}")
+    println("Context length: ${modelCard.contextLength}")
+}
+```
+
+### List Available Models
+
+```kotlin
+val client = OllamaClient(
+    baseUrl = "http://localhost:11434"
+)
+
+val models = client.getModels()
+models.forEach { card ->
+    println("${card.name}: ${card.size} bytes, ${card.contextLength} tokens")
+}
+```
+
+## Advanced Configuration
+
+### Custom Context Window
+
+```kotlin
+val executor = simpleOllamaExecutor(
+    baseUrl = "http://localhost:11434",
+    model = OllamaModels.Meta.LLAMA_3_2,
+    contextWindowStrategy = ContextWindowStrategy.Fixed(8192)
+)
+```
+
+### Custom Parameters
+
+```kotlin
+val client = OllamaClient(
+    baseUrl = "http://localhost:11434",
+    timeoutConfig = ConnectionTimeoutConfig(
+        requestTimeoutMillis = 300_000, // 5 minutes for large models
+        connectTimeoutMillis = 30_000
+    )
+)
+```
+
+### Temperature and Options
+
+```kotlin
+val executor = simpleOllamaExecutor(
+    baseUrl = "http://localhost:11434",
+    model = OllamaModels.Meta.LLAMA_3_2,
+    params = OllamaParams(
+        temperature = 0.8,
+        // Additional Ollama-specific options
+        additionalProperties = mapOf(
+            "num_predict" to 512,
+            "top_k" to 40,
+            "top_p" to 0.9
+        )
+    )
+)
+```
+
+## Model Capabilities
+
+| Model | Context | Tools | Vision | Moderation | Speed |
+|-------|---------|-------|--------|------------|-------|
+| Llama 3.2 | 131K | ✅ | ❌ | ❌ | Fast |
+| Llama 4 | 10M | ✅ | ❌ | ❌ | Medium |
+| Qwen 2.5 | 32K | ✅ | ❌ | ❌ | Fast |
+| Granite Vision | 16K | ✅ | ✅ | ❌ | Medium |
+| Llama Guard 3 | 131K | ❌ | ❌ | ✅ | Fast |
+
+## Best Practices
+
+1. **Start with smaller models** during development (3B-8B parameters)
+2. **Use tool-optimized models** (Groq variants) for function calling
+3. **Pull models in advance** - downloading can take time
+4. **Adjust context window** based on your use case
+5. **Monitor resource usage** - larger models need more RAM/VRAM
+6. **Use GPU acceleration** for better performance
+
+## System Requirements
+
+### RAM Requirements
+- **7B models**: 8GB RAM minimum
+- **13B models**: 16GB RAM minimum  
+- **33B+ models**: 32GB RAM minimum
+- **70B models**: 64GB RAM minimum
+
+### GPU Acceleration
+
+Ollama automatically uses GPU if available:
+- **NVIDIA**: CUDA support
+- **Apple**: Metal acceleration on M1/M2/M3
+- **AMD**: ROCm support (Linux)
+
+## Troubleshooting
+
+### Ollama Not Running
+
+```bash
+# Check if Ollama is running
+curl http://localhost:11434/api/tags
+
+# Start Ollama
+ollama serve
+```
+
+### Model Not Found
+
+```kotlin
+try {
+    val result = executor.execute(prompt { user("Hello") })
+} catch (e: LLMClientException) {
+    if (e.message?.contains("model") == true) {
+        // Pull the model first
+        "ollama pull ${model.id}".runCommand()
+    }
+}
+```
+
+### Out of Memory
+
+```bash
+# Use a smaller model variant
+ollama pull llama3.2:1b  # Instead of llama3.2:8b
+
+# Or reduce context window in code
+contextWindowStrategy = ContextWindowStrategy.Fixed(2048)
+```
+
+### Slow Performance
+
+```bash
+# Check GPU usage
+ollama ps
+
+# Use quantized models (smaller, faster)
+ollama pull llama3.2:3b-q4_0  # 4-bit quantization
+```
+
+## Docker Deployment
+
+```dockerfile
+FROM ollama/ollama
+
+# Pre-pull models
+RUN ollama serve & sleep 5 && ollama pull llama3.2 && pkill ollama
+
+EXPOSE 11434
+
+CMD ["ollama", "serve"]
+```
+
+```bash
+docker build -t my-ollama .
+docker run -d -p 11434:11434 my-ollama
+```
+
+## Advantages
+
+- **Free**: No API costs
+- **Private**: Data never leaves your machine
+- **Offline**: Works without internet
+- **Fast iteration**: No rate limits
+- **Full control**: Choose any open-source model
+
+## Limitations
+
+- **Requires local resources**: RAM/GPU
+- **Slower than cloud APIs**: Depends on hardware
+- **Model quality varies**: Not as capable as GPT-4/Claude
+- **Manual model management**: Need to pull/update models
+
+## Resources
+
+- [Ollama Documentation](https://ollama.com/)
+- [Ollama Model Library](https://ollama.com/library)
+- [GitHub Repository](https://github.com/ollama/ollama)
+- [API Reference](/api-reference/llm-providers/ollama)

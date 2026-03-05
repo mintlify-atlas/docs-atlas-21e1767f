@@ -1,0 +1,528 @@
+---
+title: OpenTelemetry
+description: Industry-standard observability with OpenTelemetry integration
+---
+
+The OpenTelemetry feature instruments your AI agents with industry-standard observability, enabling distributed tracing, metrics collection, and integration with monitoring backends like Jaeger, Zipkin, and Prometheus.
+
+## What is OpenTelemetry?
+
+OpenTelemetry is an observability framework that provides:
+
+- **Distributed Tracing**: Track requests across system boundaries
+- **Metrics Collection**: Monitor performance and usage patterns
+- **Spans**: Represent individual operations with timing and metadata
+- **Exporters**: Send telemetry to various backends
+- **Semantic Conventions**: Standardized attribute names for AI/LLM operations
+
+Koog's OpenTelemetry feature automatically creates spans for:
+
+- Agent creation and invocation
+- Strategy execution
+- Node execution
+- LLM calls (including token usage)
+- Tool calls
+
+## Installation
+
+```kotlin
+import ai.koog.agents.features.opentelemetry.OpenTelemetry
+import io.opentelemetry.exporter.logging.LoggingSpanExporter
+
+val agent = AIAgent(
+    executor = myExecutor,
+    strategy = myStrategy
+) {
+    install(OpenTelemetry) {
+        // Set service information
+        setServiceInfo("my-agent-service", "1.0.0")
+        
+        // Add span exporter
+        addSpanExporter(LoggingSpanExporter.create())
+    }
+}
+```
+
+## Configuration
+
+### Basic Configuration
+
+```kotlin
+install(OpenTelemetry) {
+    // Service name and version
+    setServiceInfo("my-agent", "1.0.0")
+    
+    // Add exporters
+    addSpanExporter(LoggingSpanExporter.create())
+    
+    // Enable verbose logging for debugging
+    setVerbose(true)
+}
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `serviceName` | `String` | `"ai.koog"` | Name of the service being instrumented |
+| `serviceVersion` | `String` | `"0.0.0"` | Version of the service |
+| `isVerbose` | `Boolean` | `false` | Enable verbose logging for debugging |
+| `sdk` | `OpenTelemetrySdk` | Auto-configured | Custom SDK instance |
+| `tracer` | `Tracer` | Auto-created | Custom tracer instance |
+
+### Configuration Methods
+
+```kotlin
+install(OpenTelemetry) {
+    // Set service info
+    setServiceInfo(
+        serviceName = "my-agent",
+        serviceVersion = "2.0.0"
+    )
+    
+    // Add span exporters
+    addSpanExporter(exporter)
+    
+    // Add span processors
+    addSpanProcessor { exporter ->
+        BatchSpanProcessor.builder(exporter).build()
+    }
+    
+    // Add resource attributes
+    addResourceAttributes(mapOf(
+        AttributeKey.stringKey("environment") to "production",
+        AttributeKey.stringKey("region") to "us-east-1"
+    ))
+    
+    // Set sampling strategy
+    setSampler(Sampler.alwaysOn())
+    
+    // Enable verbose logging
+    setVerbose(true)
+}
+```
+
+## Exporters
+
+### OTLP Exporter (Recommended)
+
+Send telemetry to OpenTelemetry Collector:
+
+```kotlin
+import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter
+
+addSpanExporter(
+    OtlpGrpcSpanExporter.builder()
+        .setEndpoint("http://localhost:4317")  // Default OTLP endpoint
+        .build()
+)
+```
+
+### Logging Exporter
+
+Output traces to console (useful for development):
+
+```kotlin
+import io.opentelemetry.exporter.logging.LoggingSpanExporter
+
+addSpanExporter(LoggingSpanExporter.create())
+```
+
+### Jaeger Exporter
+
+Send traces directly to Jaeger:
+
+```kotlin
+import io.opentelemetry.exporter.jaeger.JaegerGrpcSpanExporter
+
+addSpanExporter(
+    JaegerGrpcSpanExporter.builder()
+        .setEndpoint("http://localhost:14250")
+        .build()
+)
+```
+
+### Zipkin Exporter
+
+Send traces to Zipkin:
+
+```kotlin
+import io.opentelemetry.exporter.zipkin.ZipkinSpanExporter
+
+addSpanExporter(
+    ZipkinSpanExporter.builder()
+        .setEndpoint("http://localhost:9411/api/v2/spans")
+        .build()
+)
+```
+
+## Integration with Jaeger
+
+Jaeger is a popular distributed tracing system. Here's how to set it up:
+
+### 1. Start Jaeger with Docker
+
+```yaml
+# docker-compose.yaml
+version: '3'
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.39
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "16686:16686" # Jaeger UI
+      - "14250:14250" # Jaeger gRPC
+```
+
+Start with: `docker-compose up -d`
+
+### 2. Configure Agent
+
+```kotlin
+import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter
+
+val agent = AIAgent(...) {
+    install(OpenTelemetry) {
+        setServiceInfo("my-agent", "1.0.0")
+        
+        addSpanExporter(
+            OtlpGrpcSpanExporter.builder()
+                .setEndpoint("http://localhost:4317")
+                .build()
+        )
+    }
+}
+```
+
+### 3. View Traces
+
+Open Jaeger UI at `http://localhost:16686` to view your traces.
+
+## Span Types and Attributes
+
+Koog creates different span types following [OpenTelemetry Semantic Conventions for GenAI](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/):
+
+### Create Agent Span
+
+Long-lived span for the agent's lifetime:
+
+**Attributes:**
+- `gen_ai.operation.name` = `"create_agent"`
+- `gen_ai.agent.id`
+- `gen_ai.request.model`
+
+### Invoke Agent Span
+
+One execution run of an agent:
+
+**Attributes:**
+- `gen_ai.operation.name` = `"invoke_agent"`
+- `gen_ai.agent.id`
+- `gen_ai.conversation.id`
+- `gen_ai.system` (LLM provider)
+- `gen_ai.response.finish_reasons` (on error)
+
+### Strategy Span
+
+Strategy execution:
+
+**Attributes:**
+- `gen_ai.conversation.id`
+- `koog.strategy.name`
+- `koog.event.id`
+
+### Node Execute Span
+
+Individual node execution:
+
+**Attributes:**
+- `gen_ai.conversation.id`
+- `koog.node.id`
+
+### Inference Span (LLM Call)
+
+Single LLM call:
+
+**Attributes:**
+- `gen_ai.operation.name` = `"chat"`
+- `gen_ai.system` (provider: "openai", "anthropic", etc.)
+- `gen_ai.request.model`
+- `gen_ai.request.temperature`
+- `gen_ai.request.max_tokens`
+- `gen_ai.usage.input_tokens`
+- `gen_ai.usage.output_tokens`
+- `gen_ai.usage.total_tokens`
+- `gen_ai.response.finish_reasons`
+
+**Events:**
+- System, user, and assistant messages
+- Tool choice and tool result messages
+- Moderation responses
+
+### Execute Tool Span
+
+Tool execution:
+
+**Attributes:**
+- `gen_ai.tool.name`
+- `gen_ai.tool.description`
+- `gen_ai.tool.arguments`
+- `gen_ai.tool.call_id`
+- `gen_ai.tool.output`
+- `error.type` (on failure)
+
+## Resource Attributes
+
+Default resource attributes automatically added:
+
+- `service.name`: Service name
+- `service.version`: Service version
+- `service.instance.time`: Instance creation timestamp
+- `os.type`: Operating system type
+- `os.version`: OS version
+- `os.arch`: OS architecture
+
+Add custom attributes:
+
+```kotlin
+addResourceAttributes(mapOf(
+    AttributeKey.stringKey("deployment.environment") to "production",
+    AttributeKey.stringKey("deployment.region") to "us-east-1",
+    AttributeKey.stringKey("team") to "ai-platform"
+))
+```
+
+## Sampling
+
+Control which spans are collected:
+
+```kotlin
+import io.opentelemetry.sdk.trace.samplers.Sampler
+
+// Always sample (default)
+setSampler(Sampler.alwaysOn())
+
+// Never sample
+setSampler(Sampler.alwaysOff())
+
+// Sample 10% of traces
+setSampler(Sampler.traceIdRatioBased(0.1))
+
+// Parent-based sampling (follow parent span's decision)
+setSampler(Sampler.parentBased(Sampler.traceIdRatioBased(0.1)))
+```
+
+## Custom SDK
+
+Provide a pre-configured OpenTelemetry SDK:
+
+```kotlin
+import io.opentelemetry.sdk.OpenTelemetrySdk
+import io.opentelemetry.sdk.trace.SdkTracerProvider
+
+val sdk = OpenTelemetrySdk.builder()
+    .setTracerProvider(
+        SdkTracerProvider.builder()
+            .addSpanProcessor(myProcessor)
+            .setSampler(mySampler)
+            .build()
+    )
+    .build()
+
+install(OpenTelemetry) {
+    setSdk(sdk)
+}
+```
+
+<Note>
+  When using `setSdk()`, other configuration methods like `addSpanExporter()` are ignored since the SDK is already configured.
+</Note>
+
+## Examples
+
+### Basic Example
+
+```kotlin
+import ai.koog.agents.features.opentelemetry.OpenTelemetry
+import io.opentelemetry.exporter.logging.LoggingSpanExporter
+import java.util.concurrent.TimeUnit
+
+suspend fun main() {
+    val agent = AIAgent(
+        executor = simpleGoogleAIExecutor(apiKey),
+        llmModel = GoogleModels.Gemini2_0Flash,
+        systemPrompt = "You are a code assistant."
+    ) {
+        install(OpenTelemetry) {
+            setServiceInfo("code-assistant", "1.0.0")
+            addSpanExporter(LoggingSpanExporter.create())
+        }
+    }
+    
+    val result = agent.run("Create a Python hello world function")
+    println(result)
+    
+    // Wait for telemetry to be exported
+    TimeUnit.SECONDS.sleep(10)
+}
+```
+
+### Production Example
+
+```kotlin
+import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter
+import io.opentelemetry.sdk.trace.samplers.Sampler
+
+suspend fun main() {
+    val agent = AIAgent(
+        executor = simpleOpenAIExecutor(apiKey),
+        llmModel = OpenAIModels.Chat.GPT4o,
+        systemPrompt = "You are a helpful assistant."
+    ) {
+        install(OpenTelemetry) {
+            // Service identification
+            setServiceInfo("production-agent", "2.0.0")
+            
+            // Sampling strategy (10% of traces)
+            setSampler(Sampler.traceIdRatioBased(0.1))
+            
+            // Resource attributes
+            addResourceAttributes(mapOf(
+                AttributeKey.stringKey("deployment.environment") to "production",
+                AttributeKey.stringKey("service.namespace") to "ai-platform",
+                AttributeKey.stringKey("cloud.region") to "us-west-2"
+            ))
+            
+            // Export to OTLP collector
+            addSpanExporter(
+                OtlpGrpcSpanExporter.builder()
+                    .setEndpoint("https://otel-collector.example.com:4317")
+                    .addHeader("Authorization", "Bearer $apiToken")
+                    .build()
+            )
+        }
+    }
+    
+    val result = agent.run("Analyze system performance")
+    println(result)
+    
+    TimeUnit.SECONDS.sleep(10)
+}
+```
+
+### Multi-Exporter Example
+
+```kotlin
+install(OpenTelemetry) {
+    setServiceInfo("multi-export-agent", "1.0.0")
+    
+    // Export to Jaeger for visualization
+    addSpanExporter(
+        OtlpGrpcSpanExporter.builder()
+            .setEndpoint("http://localhost:4317")
+            .build()
+    )
+    
+    // Also log to console for debugging
+    addSpanExporter(LoggingSpanExporter.create())
+    
+    // Custom processor for each exporter
+    addSpanProcessor { exporter ->
+        BatchSpanProcessor.builder(exporter)
+            .setMaxQueueSize(2048)
+            .setScheduleDelay(Duration.ofSeconds(5))
+            .build()
+    }
+}
+```
+
+## Token Usage Tracking
+
+OpenTelemetry automatically tracks token usage for LLM calls:
+
+```kotlin
+// Token attributes in Inference spans:
+// - gen_ai.usage.input_tokens
+// - gen_ai.usage.output_tokens  
+// - gen_ai.usage.total_tokens
+
+// Query token usage from your observability backend:
+// Example Jaeger query: service="my-agent" AND gen_ai.usage.total_tokens > 1000
+```
+
+Use this for:
+- **Cost monitoring**: Track API usage costs
+- **Performance analysis**: Identify expensive prompts
+- **Optimization**: Find opportunities to reduce token usage
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No traces appearing">
+    - Verify the exporter endpoint is accessible
+    - Check that sampling is not set to `alwaysOff()`
+    - Ensure you wait for async export (add delay before exit)
+    - Enable verbose logging: `setVerbose(true)`
+  </Accordion>
+  
+  <Accordion title="Missing spans or incomplete traces">
+    - Verify agent execution completes successfully
+    - Check for exceptions in your code
+    - Ensure proper span processor configuration
+    - Wait sufficient time for batch processing
+  </Accordion>
+  
+  <Accordion title="Too many spans">
+    - Adjust sampling rate: `Sampler.traceIdRatioBased(0.1)`
+    - Use parent-based sampling for consistency
+    - Filter at the collector level
+  </Accordion>
+  
+  <Accordion title="High memory usage">
+    - Reduce max queue size in BatchSpanProcessor
+    - Decrease schedule delay for more frequent exports
+    - Increase sampling ratio to collect fewer traces
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use OTLP exporter">
+    OTLP is the standard protocol and works with all major backends. Prefer it over backend-specific exporters.
+  </Accordion>
+  
+  <Accordion title="Configure appropriate sampling">
+    In production, use ratio-based sampling (e.g., 0.1 = 10%) to balance observability with overhead.
+  </Accordion>
+  
+  <Accordion title="Add meaningful resource attributes">
+    Include environment, region, version to make traces easier to filter and analyze.
+  </Accordion>
+  
+  <Accordion title="Monitor token usage">
+    Use `gen_ai.usage.*` attributes to track and optimize LLM costs.
+  </Accordion>
+  
+  <Accordion title="Wait for export completion">
+    Add a delay before application exit to ensure all spans are exported.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  **Performance**: Excessive tracing can impact agent performance. Use sampling and batch processing in production.
+</Warning>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Tracing" icon="chart-line" href="/features/tracing">
+    Koog-specific tracing with custom message processors
+  </Card>
+  <Card title="Event Handlers" icon="webhook" href="/features/event-handlers">
+    Lightweight hooks for custom monitoring logic
+  </Card>
+</CardGroup>

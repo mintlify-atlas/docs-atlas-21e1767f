@@ -1,0 +1,574 @@
+---
+title: RAG (Retrieval-Augmented Generation)
+description: Build document retrieval systems with vector storage and semantic search
+---
+
+The RAG (Retrieval-Augmented Generation) module provides core interfaces and implementations for document storage, retrieval, and ranking in AI applications.
+
+## Overview
+
+The RAG module consists of two main components:
+
+- **rag-base**: Core interfaces for document storage and retrieval
+- **vector-storage**: Vector-based storage with semantic search capabilities
+
+**Why use RAG?**
+
+- **Grounded Responses**: Agents answer questions based on your documents
+- **Semantic Search**: Find documents by meaning, not just keywords
+- **Scalable Storage**: Handle large document collections efficiently
+- **Ranked Retrieval**: Get the most relevant documents first
+- **Flexible Backend**: Swap storage implementations without code changes
+
+## Installation
+
+Add the RAG dependencies:
+
+```kotlin gradle
+dependencies {
+    implementation("ai.koog:rag-base:$koogVersion")
+    implementation("ai.koog:vector-storage:$koogVersion")
+}
+```
+
+## Core Interfaces
+
+### DocumentStorage
+
+The foundational interface for document operations:
+
+```kotlin
+interface DocumentStorage<TDocument> {
+    /**
+     * Stores a document and returns its unique ID.
+     */
+    suspend fun store(document: TDocument): String
+
+    /**
+     * Retrieves a document by its ID.
+     */
+    suspend fun read(documentId: String): TDocument?
+
+    /**
+     * Deletes a document by its ID.
+     */
+    suspend fun delete(documentId: String): Boolean
+}
+```
+
+**Source**: `rag/rag-base/Module.md:9`
+
+### DocumentStorageWithPayload
+
+Extends document storage with metadata support:
+
+```kotlin
+interface DocumentStorageWithPayload<TDocument, TPayload> : DocumentStorage<TDocument> {
+    /**
+     * Stores a document with its associated payload.
+     */
+    suspend fun store(document: TDocument, payload: TPayload): String
+
+    /**
+     * Retrieves a document with its payload.
+     */
+    suspend fun readWithPayload(documentId: String): DocumentWithPayload<TDocument, TPayload>?
+
+    /**
+     * Retrieves just the payload for a document.
+     */
+    suspend fun getPayload(documentId: String): TPayload?
+}
+```
+
+**Source**: `rag/rag-base/Module.md:10`
+
+### RankedDocumentStorage
+
+Extends document storage with ranking capabilities:
+
+```kotlin
+interface RankedDocumentStorage<TDocument> : DocumentStorage<TDocument> {
+    /**
+     * Finds the most relevant documents for a query.
+     */
+    suspend fun mostRelevantDocuments(
+        query: String,
+        count: Int,
+        similarityThreshold: Double
+    ): List<TDocument>
+}
+```
+
+**Source**: `rag/rag-base/Module.md:11`
+
+## Quick Start
+
+### Basic Document Storage
+
+Store and retrieve documents:
+
+```kotlin
+import ai.koog.rag.DocumentStorage
+
+suspend fun basicStorage(storage: DocumentStorage<TextDocument>) {
+    // Store a document
+    val document = TextDocument("This is a sample document about AI.")
+    val documentId = storage.store(document)
+    println("Document stored with ID: $documentId")
+
+    // Retrieve the document
+    val retrieved = storage.read(documentId)
+    println("Retrieved: ${retrieved?.content}")
+
+    // Delete the document
+    val deleted = storage.delete(documentId)
+    println("Document deleted: $deleted")
+}
+```
+
+**Source**: `rag/rag-base/Module.md:21`
+
+### Document with Metadata
+
+Store documents with associated metadata:
+
+```kotlin
+import ai.koog.rag.DocumentStorageWithPayload
+
+data class DocumentMetadata(
+    val author: String,
+    val creationDate: String,
+    val tags: List<String>
+)
+
+suspend fun storageWithMetadata(
+    storage: DocumentStorageWithPayload<TextDocument, DocumentMetadata>
+) {
+    // Create document and metadata
+    val document = TextDocument("This is a document about machine learning.")
+    val metadata = DocumentMetadata(
+        author = "John Doe",
+        creationDate = "2024-03-05",
+        tags = listOf("AI", "ML", "tutorial")
+    )
+
+    // Store with metadata
+    val documentId = storage.store(document, metadata)
+
+    // Retrieve with metadata
+    val docWithPayload = storage.readWithPayload(documentId)
+    println("Document: ${docWithPayload?.document?.content}")
+    println("Author: ${docWithPayload?.payload?.author}")
+    println("Tags: ${docWithPayload?.payload?.tags}")
+
+    // Retrieve just metadata
+    val justMetadata = storage.getPayload(documentId)
+    println("Creation date: ${justMetadata?.creationDate}")
+}
+```
+
+**Source**: `rag/rag-base/Module.md:39`
+
+### Semantic Document Retrieval
+
+Find relevant documents using semantic search:
+
+```kotlin
+import ai.koog.rag.RankedDocumentStorage
+
+suspend fun semanticRetrieval(storage: RankedDocumentStorage<TextDocument>) {
+    // Store multiple documents
+    storage.store(TextDocument("Artificial intelligence is transforming industries."))
+    storage.store(TextDocument("Machine learning is a subset of AI."))
+    storage.store(TextDocument("The weather is nice today."))
+    storage.store(TextDocument("Deep learning uses neural networks."))
+
+    // Find relevant documents
+    val query = "What is artificial intelligence?"
+    val relevantDocs = storage.mostRelevantDocuments(
+        query = query,
+        count = 2,
+        similarityThreshold = 0.5
+    )
+
+    println("Most relevant documents for: $query")
+    relevantDocs.forEach { doc ->
+        println("- ${doc.content}")
+    }
+}
+```
+
+**Source**: `rag/rag-base/Module.md:68`
+
+## Vector Storage
+
+Use vector embeddings for semantic search:
+
+### Creating Vector Storage
+
+```kotlin
+import ai.koog.embeddings.Embedder
+import ai.koog.rag.vector.VectorStorage
+import ai.koog.rag.vector.EmbeddingBasedDocumentStorage
+import ai.koog.rag.vector.TextDocumentEmbedder
+
+suspend fun createVectorStorage(embedder: Embedder): RankedDocumentStorage<TextDocument> {
+    // Create a text document reader
+    val textReader = object : TextDocumentReader<TextDocument> {
+        override suspend fun read(document: TextDocument): String = document.content
+    }
+
+    // Create document embedder
+    val documentEmbedder = TextDocumentEmbedder(textReader, embedder)
+
+    // Create vector storage (use your implementation)
+    val vectorStorage: VectorStorage<TextDocument> = YourVectorStorageImpl()
+
+    // Create embedding-based document storage
+    return EmbeddingBasedDocumentStorage(documentEmbedder, vectorStorage)
+}
+```
+
+**Source**: `rag/vector-storage/Module.md:20`
+
+### Using Vector Storage
+
+```kotlin
+suspend fun useVectorStorage(storage: RankedDocumentStorage<TextDocument>) {
+    // Store documents
+    storage.store(TextDocument("Neural networks are inspired by biological neurons."))
+    storage.store(TextDocument("Deep learning uses multiple layers of neural networks."))
+    storage.store(TextDocument("Transformers revolutionized natural language processing."))
+    storage.store(TextDocument("The capital of France is Paris."))
+
+    // Find semantically similar documents
+    val query = "How do artificial neural networks work?"
+    val similarDocs = storage.mostRelevantDocuments(
+        query = query,
+        count = 3,
+        similarityThreshold = 0.7
+    )
+
+    println("Documents most similar to: $query")
+    similarDocs.forEach { doc ->
+        println("- ${doc.content}")
+    }
+}
+```
+
+**Source**: `rag/vector-storage/Module.md:42`
+
+## Use Cases
+
+### Question Answering Agent
+
+Build an agent that answers questions from documents:
+
+```kotlin
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.tools.annotations.Tool
+import ai.koog.agents.core.tools.annotations.LLMDescription
+
+class RAGTools(private val storage: RankedDocumentStorage<TextDocument>) {
+    @Tool
+    @LLMDescription("Search documents for relevant information")
+    suspend fun searchDocuments(
+        query: String,
+        maxResults: Int = 5
+    ): List<String> {
+        val docs = storage.mostRelevantDocuments(
+            query = query,
+            count = maxResults,
+            similarityThreshold = 0.6
+        )
+        return docs.map { it.content }
+    }
+}
+
+// Create agent with RAG
+val agent = AIAgent(
+    promptExecutor = executor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = ToolRegistry {
+        tools(RAGTools(storage).asTools())
+    }
+)
+
+// Ask questions
+val answer = agent.run("What does the documentation say about embeddings?")
+```
+
+### Document Ingestion Pipeline
+
+Process and store documents in batches:
+
+```kotlin
+suspend fun ingestDocuments(
+    storage: DocumentStorageWithPayload<TextDocument, DocumentMetadata>,
+    documents: List<Pair<TextDocument, DocumentMetadata>>
+) {
+    val results = documents.map { (doc, metadata) ->
+        async {
+            try {
+                val id = storage.store(doc, metadata)
+                Result.success(id)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }.awaitAll()
+
+    val successful = results.count { it.isSuccess }
+    val failed = results.count { it.isFailure }
+    
+    println("Ingested $successful documents, $failed failed")
+}
+```
+
+### Hybrid Search
+
+Combine semantic and keyword search:
+
+```kotlin
+suspend fun hybridSearch(
+    storage: RankedDocumentStorage<TextDocument>,
+    query: String,
+    keywords: List<String>
+): List<TextDocument> {
+    // Get semantically similar documents
+    val semanticResults = storage.mostRelevantDocuments(
+        query = query,
+        count = 10,
+        similarityThreshold = 0.5
+    )
+
+    // Filter by keywords
+    val filteredResults = semanticResults.filter { doc ->
+        keywords.any { keyword ->
+            doc.content.contains(keyword, ignoreCase = true)
+        }
+    }
+
+    return filteredResults.take(5)
+}
+```
+
+### Document Deduplication
+
+Find and remove duplicate documents:
+
+```kotlin
+suspend fun deduplicateDocuments(
+    storage: RankedDocumentStorage<TextDocument>,
+    threshold: Double = 0.95
+) {
+    // This is a simplified example
+    // In practice, you'd need access to all documents
+    val allDocuments = getAllDocuments(storage)
+    
+    val duplicates = mutableSetOf<String>()
+    
+    allDocuments.forEach { doc1 ->
+        val similar = storage.mostRelevantDocuments(
+            query = doc1.content,
+            count = 2,
+            similarityThreshold = threshold
+        )
+        
+        // If we find another document very similar to this one
+        if (similar.size > 1) {
+            // Mark the second one as duplicate
+            duplicates.add(similar[1].id)
+        }
+    }
+    
+    // Delete duplicates
+    duplicates.forEach { id ->
+        storage.delete(id)
+    }
+    
+    println("Removed ${duplicates.size} duplicate documents")
+}
+```
+
+## Text Document Reader
+
+Transform documents into text for embedding:
+
+```kotlin
+interface TextDocumentReader<TDocument> {
+    /**
+     * Reads a document and returns its text representation.
+     */
+    suspend fun read(document: TDocument): String
+}
+
+// Example implementation for PDF documents
+class PDFDocumentReader : TextDocumentReader<PDFDocument> {
+    override suspend fun read(document: PDFDocument): String {
+        // Extract text from PDF
+        return extractTextFromPDF(document.path)
+    }
+}
+
+// Usage
+val pdfReader = PDFDocumentReader()
+val text = pdfReader.read(PDFDocument("path/to/document.pdf"))
+println("Extracted text: $text")
+```
+
+**Source**: `rag/rag-base/Module.md:12` and `rag/rag-base/Module.md:58`
+
+## Document Embedder
+
+Convert documents to vector embeddings:
+
+```kotlin
+interface DocumentEmbedder<TDocument> {
+    /**
+     * Converts a document into a vector representation.
+     */
+    suspend fun embed(document: TDocument): Vector
+}
+
+// Text document embedder implementation
+class TextDocumentEmbedder(
+    private val textReader: TextDocumentReader<TextDocument>,
+    private val embedder: Embedder
+) : DocumentEmbedder<TextDocument> {
+    override suspend fun embed(document: TextDocument): Vector {
+        val text = textReader.read(document)
+        return embedder.embed(text)
+    }
+}
+```
+
+**Source**: `rag/vector-storage/Module.md:11`
+
+## Best Practices
+
+1. **Batch Operations**: Process documents in parallel
+   ```kotlin
+   val ids = documents.map { doc ->
+       async { storage.store(doc) }
+   }.awaitAll()
+   ```
+
+2. **Chunking**: Split large documents into smaller chunks
+   ```kotlin
+   fun chunkDocument(text: String, chunkSize: Int = 500): List<String> {
+       return text.chunked(chunkSize)
+   }
+   ```
+
+3. **Metadata Indexing**: Store searchable metadata
+   ```kotlin
+   data class DocumentMetadata(
+       val title: String,
+       val author: String,
+       val tags: List<String>,
+       val timestamp: Long
+   )
+   ```
+
+4. **Error Handling**: Handle storage failures gracefully
+   ```kotlin
+   suspend fun safeStore(doc: TextDocument): String? {
+       return try {
+           storage.store(doc)
+       } catch (e: Exception) {
+           logger.error("Failed to store document", e)
+           null
+       }
+   }
+   ```
+
+5. **Relevance Tuning**: Adjust similarity thresholds
+   ```kotlin
+   // Higher threshold = more strict matching
+   val strictResults = storage.mostRelevantDocuments(
+       query = query,
+       count = 5,
+       similarityThreshold = 0.85
+   )
+   
+   // Lower threshold = more lenient matching
+   val lenientResults = storage.mostRelevantDocuments(
+       query = query,
+       count = 5,
+       similarityThreshold = 0.6
+   )
+   ```
+
+## Performance Considerations
+
+1. **Indexing**: Pre-compute embeddings for faster retrieval
+2. **Caching**: Cache frequently accessed documents
+3. **Batch Queries**: Process multiple queries in parallel
+4. **Dimension Reduction**: Use smaller embedding models for speed
+5. **Pagination**: Limit result counts for large datasets
+
+## Integration with Agents
+
+Use RAG with agents for grounded responses:
+
+```kotlin
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.tools.ToolRegistry
+
+class DocumentSearchTool(private val storage: RankedDocumentStorage<TextDocument>) {
+    @Tool
+    @LLMDescription("Search the knowledge base for relevant information")
+    suspend fun search(query: String): String {
+        val docs = storage.mostRelevantDocuments(
+            query = query,
+            count = 3,
+            similarityThreshold = 0.7
+        )
+        
+        return docs.joinToString("\n\n") { doc ->
+            "Document: ${doc.content}"
+        }
+    }
+}
+
+// Create agent with document search
+val agent = AIAgent(
+    promptExecutor = executor,
+    llmModel = model,
+    toolRegistry = ToolRegistry {
+        tools(DocumentSearchTool(storage).asTools())
+    },
+    agentConfig = AIAgentConfig(
+        prompt = prompt("rag-agent") {
+            system(
+                "You are a helpful assistant. Use the search tool to find " +
+                "relevant information before answering questions."
+            )
+        }
+    )
+)
+```
+
+## Platform Support
+
+- **JVM**: Full support
+- **JS**: Full support
+- **Native**: Planned
+
+## Common Use Cases
+
+1. **Knowledge Bases**: Company documentation search
+2. **Customer Support**: Answer questions from documentation
+3. **Research**: Scientific paper retrieval
+4. **Legal**: Case law and document search
+5. **Code Search**: Find relevant code examples
+6. **E-commerce**: Product recommendation based on descriptions
+
+## Next Steps
+
+- Learn about [embeddings](/integrations/embeddings) for vector generation
+- Explore [vector storage implementations](/guides/vector-storage)
+- See [RAG examples](/examples/rag) in action
+- Check out [agent patterns](/guides/agent-patterns) with RAG

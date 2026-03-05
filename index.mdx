@@ -1,97 +1,195 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Koog - Kotlin AI Agent Framework"
+description: "Build predictable, fault-tolerant and enterprise-ready AI agents across all platforms with Kotlin"
 ---
 
-## Setting up
+<div style={{
+  background: "linear-gradient(135deg, #a237f7 0%, #e73784 100%)",
+  borderRadius: "8px",
+  padding: "48px 32px",
+  textAlign: "center",
+  marginBottom: "32px"
+}}>
+  <h1 style={{
+    fontSize: "48px",
+    fontWeight: "700",
+    color: "#ffffff",
+    marginBottom: "16px",
+    fontFamily: "Inter"
+  }}>
+    Build AI Agents with Kotlin
+  </h1>
+  <p style={{
+    fontSize: "20px",
+    color: "#ffffff",
+    marginBottom: "32px",
+    fontFamily: "Inter"
+  }}>
+    The official Kotlin framework for building predictable, fault-tolerant and enterprise-ready AI agents across all platforms
+  </p>
+  <div style={{ display: "flex", gap: "16px", justifyContent: "center", flexWrap: "wrap" }}>
+    <a href="/quickstart" style={{
+      background: "#040404",
+      color: "#ffffff",
+      padding: "12px 24px",
+      borderRadius: "4px",
+      textDecoration: "none",
+      fontWeight: "600",
+      fontFamily: "Inter"
+    }}>
+      Get Started
+    </a>
+    <a href="https://github.com/JetBrains/koog" style={{
+      background: "transparent",
+      color: "#ffffff",
+      padding: "12px 24px",
+      borderRadius: "4px",
+      textDecoration: "none",
+      fontWeight: "600",
+      border: "2px solid #ffffff",
+      fontFamily: "Inter"
+    }}>
+      View on GitHub
+    </a>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+## Why Koog?
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+Koog is a Kotlin-based framework designed to build and run AI agents entirely in idiomatic Kotlin. It lets you create agents that can interact with tools, handle complex workflows, and communicate with users.
 
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={3}>
+  <Card title="Multiplatform" icon="globe">
+    Deploy agents across JVM, JS, WasmJS, Android, and iOS targets using Kotlin Multiplatform
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Fault-Tolerant" icon="shield-check">
+    Built-in retries and state persistence to handle failures gracefully
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Enterprise-Ready" icon="building">
+    Integrate with Spring Boot and Ktor for production deployments
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Type-Safe DSL" icon="code">
+    Idiomatic Kotlin DSL designed specifically for JVM and Kotlin developers
   </Card>
-</Columns>
+  <Card title="Multiple LLM Providers" icon="brain">
+    Support for OpenAI, Anthropic, Google, Ollama, DeepSeek, and more
+  </Card>
+  <Card title="Observability" icon="chart-line">
+    Built-in OpenTelemetry support for monitoring and debugging
+  </Card>
+</CardGroup>
 
-## Create beautiful pages
+## Quick Example
 
-Everything you need to create world-class documentation.
+Get started with a simple agent in just a few lines of Kotlin:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+```kotlin
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
 
-## Need inspiration?
+suspend fun main() {
+    val apiKey = System.getenv("OPENAI_API_KEY")
+    
+    val agent = AIAgent(
+        promptExecutor = simpleOpenAIExecutor(apiKey),
+        systemPrompt = "You are a helpful assistant. Answer user questions concisely.",
+        llmModel = OpenAIModels.Chat.GPT4o
+    )
+    
+    val result = agent.run("Hello! How can you help me?")
+    println(result)
+}
+```
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Intelligent History Compression" icon="compress">
+    Optimize token usage while maintaining context in long-running conversations
+  </Card>
+  <Card title="Graph-Based Workflows" icon="diagram-project">
+    Design complex agent behaviors using intuitive graph-based workflows
+  </Card>
+  <Card title="Model Context Protocol" icon="plug">
+    Use MCP tools in AI agents for enhanced functionality
+  </Card>
+  <Card title="Agent Client Protocol" icon="comments">
+    Build ACP-compliant agents that communicate with standardized client applications
+  </Card>
+  <Card title="Knowledge Retrieval" icon="database">
+    Retain and retrieve knowledge across conversations using vector embeddings and RAG
+  </Card>
+  <Card title="Streaming API" icon="stream">
+    Process responses in real-time with streaming support and parallel tool calls
+  </Card>
+  <Card title="Custom Tools" icon="wrench">
+    Enhance your agents with tools that access external systems and APIs
+  </Card>
+  <Card title="Comprehensive Testing" icon="flask">
+    Debug and test agents with detailed tracing and mocking utilities
+  </Card>
+</CardGroup>
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first AI agent in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Add Koog to your Kotlin project
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/agents">
+    Learn the fundamental concepts behind Koog
+  </Card>
+  <Card title="Examples" icon="code" href="/examples/overview">
+    Explore real-world examples and use cases
+  </Card>
+</CardGroup>
+
+## Supported LLM Providers
+
+<CardGroup cols={4}>
+  <Card title="OpenAI" icon="robot" href="/llm-providers/openai">
+    GPT-4, GPT-3.5, and more
+  </Card>
+  <Card title="Anthropic" icon="message-bot" href="/llm-providers/anthropic">
+    Claude 3 and Claude 4
+  </Card>
+  <Card title="Google" icon="google" href="/llm-providers/google">
+    Gemini models
+  </Card>
+  <Card title="Ollama" icon="server" href="/llm-providers/ollama">
+    Local LLM deployment
+  </Card>
+  <Card title="OpenRouter" icon="route" href="/llm-providers/openrouter">
+    Access multiple models
+  </Card>
+  <Card title="DeepSeek" icon="magnifying-glass" href="/llm-providers/deepseek">
+    DeepSeek models
+  </Card>
+  <Card title="Bedrock" icon="aws" href="/llm-providers/bedrock">
+    AWS Bedrock integration
+  </Card>
+  <Card title="View All" icon="list" href="/llm-providers/overview">
+    See all providers
+  </Card>
+</CardGroup>
+
+## Community and Support
+
+<CardGroup cols={2}>
+  <Card title="Slack Channel" icon="slack" href="https://docs.koog.ai/koog-slack-channel/">
+    Join our community on Slack
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/JetBrains/koog">
+    Star us on GitHub and contribute
+  </Card>
+  <Card title="Issue Tracker" icon="bug" href="https://youtrack.jetbrains.com/issues/KG">
+    Report bugs and request features
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/ai-agent">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>

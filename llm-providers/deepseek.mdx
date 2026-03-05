@@ -1,0 +1,400 @@
+---
+title: DeepSeek Provider
+description: Cost-effective AI models with strong code generation capabilities
+---
+
+DeepSeek provides high-performance language models at competitive prices, with particular strength in code generation and structured outputs.
+
+## Installation
+
+The DeepSeek client is included in the core Koog library. No additional dependencies required.
+
+## Quick Start
+
+```kotlin
+import ai.koog.prompt.executor.clients.deepseek.*
+import ai.koog.agents.core.*
+
+val executor = simpleDeepSeekExecutor(
+    apiKey = System.getenv("DEEPSEEK_API_KEY"),
+    model = DeepSeekModels.DeepSeekV3
+)
+
+val agent = AIAgent(
+    executor = executor,
+    tools = toolRegistry {
+        // Your tools here
+    }
+) {
+    // Define your agent strategy
+}
+
+val result = agent.execute("Write a Python function...")
+```
+
+## Authentication
+
+### API Key Setup
+
+Get your API key from [DeepSeek Platform](https://platform.deepseek.com/).
+
+```bash
+export DEEPSEEK_API_KEY=sk-...
+```
+
+### Programmatic Configuration
+
+```kotlin
+val client = DeepSeekLLMClient(
+    apiKey = "sk-...",
+    settings = DeepSeekClientSettings(
+        baseUrl = "https://api.deepseek.com",
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 120_000
+        )
+    )
+)
+```
+
+## Available Models
+
+DeepSeek is based on OpenAI's API format and supports similar model naming:
+
+```kotlin
+// Use DeepSeek models via model ID
+val model = LLModel(
+    provider = LLMProvider.DeepSeek,
+    id = "deepseek-chat" // Main chat model
+)
+
+val coderModel = LLModel(
+    provider = LLMProvider.DeepSeek,
+    id = "deepseek-coder" // Code-specialized
+)
+```
+
+### Get Available Models
+
+```kotlin
+val client = DeepSeekLLMClient(
+    apiKey = System.getenv("DEEPSEEK_API_KEY")
+)
+
+val models = client.models()
+models.forEach { model ->
+    println("${model.id}: ${model.capabilities}")
+}
+```
+
+## Code Examples
+
+### Basic Chat Completion
+
+```kotlin
+val executor = simpleDeepSeekExecutor(
+    apiKey = System.getenv("DEEPSEEK_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.DeepSeek,
+        id = "deepseek-chat"
+    )
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user("Explain recursion in programming")
+    }
+)
+
+println(result.first().content)
+```
+
+### Code Generation
+
+```kotlin
+val executor = simpleDeepSeekExecutor(
+    apiKey = System.getenv("DEEPSEEK_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.DeepSeek,
+        id = "deepseek-coder" // Use coder variant
+    )
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user("""
+            Write a Python function that:
+            1. Takes a list of integers
+            2. Filters out duplicates
+            3. Returns sorted unique values
+        """)
+    }
+)
+
+println(result.first().content)
+```
+
+### Function Calling
+
+```kotlin
+data class CodeExecutionArgs(val code: String, val language: String)
+
+val executeTool = tool<CodeExecutionArgs, String>(
+    name = "execute_code",
+    description = "Execute code and return output"
+) { args ->
+    // Your code execution logic
+    "Output: 42"
+}
+
+val agent = AIAgent(
+    executor = simpleDeepSeekExecutor(
+        apiKey = System.getenv("DEEPSEEK_API_KEY"),
+        model = LLModel(
+            provider = LLMProvider.DeepSeek,
+            id = "deepseek-chat"
+        )
+    ),
+    tools = toolRegistry { tool(executeTool) }
+) {
+    defineGraph<String, String>("code-agent") {
+        val response = callLLM()
+        finish(response)
+    }
+}
+
+val result = agent.execute("Run this Python code: print(6 * 7)")
+```
+
+### Structured Output
+
+DeepSeek requires adding "JSON" to the prompt for structured output:
+
+```kotlin
+@Serializable
+data class CodeAnalysis(
+    val language: String,
+    val complexity: String,
+    val suggestions: List<String>
+)
+
+val executor = simpleDeepSeekExecutor(
+    apiKey = System.getenv("DEEPSEEK_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.DeepSeek,
+        id = "deepseek-chat"
+    ),
+    params = DeepSeekParams(
+        schema = LLMParams.Schema.JSON(
+            name = "CodeAnalysis",
+            schema = /* JSON schema */
+        )
+    )
+)
+
+// Note: DeepSeek automatically adds "Respond with JSON" to messages
+val result = executor.execute(
+    prompt = prompt {
+        user("Analyze this code: def hello(): print('Hello')")
+    }
+)
+
+val analysis = Json.decodeFromString<CodeAnalysis>(result.first().content)
+```
+
+### Streaming Responses
+
+```kotlin
+val executor = simpleDeepSeekExecutor(
+    apiKey = System.getenv("DEEPSEEK_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.DeepSeek,
+        id = "deepseek-chat"
+    )
+)
+
+executor.executeStreaming(
+    prompt = prompt { user("Explain async programming") }
+).collect { frame ->
+    when (frame) {
+        is StreamFrame.TextDelta -> print(frame.text)
+        is StreamFrame.ToolCallDelta -> {
+            println("Tool: ${frame.name}")
+        }
+        is StreamFrame.End -> println("\nDone!")
+        else -> {}
+    }
+}
+```
+
+## Advanced Configuration
+
+### Custom Parameters
+
+```kotlin
+val executor = simpleDeepSeekExecutor(
+    apiKey = System.getenv("DEEPSEEK_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.DeepSeek,
+        id = "deepseek-chat"
+    ),
+    params = DeepSeekParams(
+        temperature = 0.7,
+        maxTokens = 2000,
+        topP = 0.9,
+        frequencyPenalty = 0.5,
+        presencePenalty = 0.5,
+        stop = listOf("\n\n", "END"),
+        logprobs = true,
+        topLogprobs = 5
+    )
+)
+```
+
+### Tool Choice Control
+
+```kotlin
+val executor = simpleDeepSeekExecutor(
+    apiKey = System.getenv("DEEPSEEK_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.DeepSeek,
+        id = "deepseek-chat"
+    ),
+    params = DeepSeekParams(
+        toolChoice = LLMParams.ToolChoice.Required // Auto, None, Required, Named
+    )
+)
+```
+
+## Model Capabilities
+
+| Model | Context | Features |
+|-------|---------|----------|
+| deepseek-chat | 32K | Chat, tools, structured output |
+| deepseek-coder | 32K | Code generation, tools |
+
+## Pricing
+
+DeepSeek is known for competitive pricing. Check [DeepSeek Pricing](https://platform.deepseek.com/pricing) for current rates.
+
+**Approximate costs (per 1M tokens):**
+- Input: ~$0.14
+- Output: ~$0.28
+
+Significantly cheaper than OpenAI and Anthropic for comparable quality.
+
+## Best Practices
+
+1. **Use deepseek-coder** for code-related tasks
+2. **Leverage structured outputs** - DeepSeek handles JSON well
+3. **Be specific in prompts** - model responds better to detailed instructions
+4. **Test thoroughly** - quality can vary by task type
+5. **Monitor costs** - even though cheap, usage adds up
+
+## Advantages
+
+- **Cost-effective**: Much cheaper than GPT-4/Claude
+- **Strong coding**: Excellent for code generation and analysis
+- **Good quality**: Competitive performance for many tasks
+- **OpenAI-compatible**: Easy migration from OpenAI API
+
+## Limitations
+
+- **32K context**: Smaller than GPT-4/Claude (128K-400K)
+- **No embeddings**: Use OpenAI/Google for embeddings
+- **No moderation**: Implement custom content filtering
+- **No vision**: Text-only (no image analysis)
+- **Newer provider**: Less battle-tested than established providers
+
+## Use Cases
+
+### Ideal For:
+- Code generation and review
+- Technical documentation
+- Cost-conscious production deployments
+- High-volume applications
+- Structured data extraction
+
+### Not Ideal For:
+- Vision tasks (no image support)
+- Very long documents (32K limit)
+- Applications requiring embeddings
+- Content moderation
+
+## Troubleshooting
+
+### Rate Limits
+
+```kotlin
+val client = DeepSeekLLMClient(
+    apiKey = System.getenv("DEEPSEEK_API_KEY"),
+    settings = DeepSeekClientSettings(
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 180_000 // Allow more time
+        )
+    )
+)
+```
+
+### Error Handling
+
+```kotlin
+try {
+    val result = executor.execute(prompt { user("Hello") })
+} catch (e: LLMClientException) {
+    when {
+        e.message?.contains("rate_limit") == true -> {
+            // Implement backoff
+        }
+        e.message?.contains("invalid_request_error") == true -> {
+            // Check request format
+        }
+        else -> throw e
+    }
+}
+```
+
+### Structured Output Issues
+
+DeepSeek requires explicit JSON formatting:
+
+```kotlin
+// For structured output, ensure you use the schema parameter
+val params = DeepSeekParams(
+    schema = LLMParams.Schema.JSON(
+        name = "MySchema",
+        schema = myJsonSchema
+    )
+)
+
+// Koog automatically adds "Respond with JSON" to the assistant messages
+```
+
+## Migration from OpenAI
+
+DeepSeek uses OpenAI-compatible API format:
+
+```kotlin
+// Before (OpenAI)
+val executor = simpleOpenAIExecutor(
+    apiKey = openaiKey,
+    model = OpenAIModels.Chat.GPT4o
+)
+
+// After (DeepSeek)
+val executor = simpleDeepSeekExecutor(
+    apiKey = deepseekKey,
+    model = LLModel(
+        provider = LLMProvider.DeepSeek,
+        id = "deepseek-chat"
+    )
+)
+
+// Same API calls work!
+```
+
+## Resources
+
+- [DeepSeek Platform](https://platform.deepseek.com/)
+- [API Documentation](https://api-docs.deepseek.com/)
+- [Pricing](https://platform.deepseek.com/pricing)
+- [API Reference](/api-reference/llm-providers/deepseek)

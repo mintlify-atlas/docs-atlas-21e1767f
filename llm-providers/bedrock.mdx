@@ -1,0 +1,501 @@
+---
+title: AWS Bedrock Provider
+description: Enterprise AI on AWS with multiple model families and built-in guardrails
+---
+
+AWS Bedrock provides access to multiple AI model families through a unified API with enterprise features like Guardrails, VPC support, and AWS integration.
+
+## Installation
+
+The Bedrock client is JVM-only and requires AWS SDK dependencies:
+
+```kotlin
+dependencies {
+    implementation("ai.koog:prompt-executor-bedrock-client:VERSION")
+}
+```
+
+## Quick Start
+
+```kotlin
+import ai.koog.prompt.executor.clients.bedrock.*
+import ai.koog.agents.core.*
+import aws.smithy.kotlin.runtime.auth.awscredentials.*
+
+val executor = BedrockLLMClient(
+    identityProvider = DefaultChainCredentialsProvider(),
+    settings = BedrockClientSettings(
+        region = "us-east-1"
+    )
+)
+
+val agent = AIAgent(
+    executor = executor,
+    tools = toolRegistry {
+        // Your tools here
+    }
+) {
+    // Define your agent strategy
+}
+
+val result = agent.execute("Analyze this data...")
+```
+
+## Authentication
+
+### AWS Credentials
+
+Bedrock supports multiple authentication methods:
+
+```kotlin
+import aws.smithy.kotlin.runtime.auth.awscredentials.*
+
+// 1. Default credential chain (environment, profile, IAM role)
+val provider = DefaultChainCredentialsProvider()
+
+// 2. Static credentials
+val provider = StaticCredentialsProvider {
+    accessKeyId = "AKIA..."
+    secretAccessKey = "..."
+}
+
+// 3. Profile-based
+val provider = ProfileCredentialsProvider(
+    profileName = "my-profile"
+)
+
+// 4. Bearer token (for some deployments)
+val tokenProvider = StaticBearerTokenProvider("token")
+```
+
+### Client Configuration
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = DefaultChainCredentialsProvider(),
+    settings = BedrockClientSettings(
+        region = "us-east-1",
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 180_000
+        ),
+        apiMethod = BedrockAPIMethod.Converse, // or InvokeModel
+        maxRetries = 3
+    )
+)
+```
+
+## Available Model Families
+
+### Anthropic Claude (Recommended)
+
+High-quality models with strong reasoning.
+
+```kotlin
+BedrockModels.Claude.Sonnet4_5       // Most capable
+BedrockModels.Claude.Haiku4_5        // Fast and efficient
+BedrockModels.Claude.Opus4_6         // Premium model
+```
+
+### Amazon Nova
+
+AWS-native models with competitive pricing.
+
+```kotlin
+BedrockModels.Nova.NovaPro           // Balanced
+BedrockModels.Nova.NovaLite          // Cost-effective
+BedrockModels.Nova.NovaMicro         // Ultra-fast
+```
+
+### Meta Llama
+
+Open-source models on AWS infrastructure.
+
+```kotlin
+BedrockModels.Llama.Llama3_1_70B     // Most capable
+BedrockModels.Llama.Llama3_1_8B      // Fast variant
+```
+
+### Moonshot Kimi
+
+Requires Converse API:
+
+```kotlin
+val model = LLModel(
+    provider = LLMProvider.Bedrock,
+    id = "moonshot.kimi-v1"
+)
+```
+
+### Embeddings
+
+```kotlin
+BedrockModels.Embeddings.TitanEmbedV2     // Amazon Titan
+BedrockModels.Embeddings.CohereEmbedV3    // Cohere
+```
+
+## API Methods
+
+Bedrock supports two API methods:
+
+### Converse API (Recommended)
+
+Unified interface across all models:
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = credentialsProvider,
+    settings = BedrockClientSettings(
+        region = "us-east-1",
+        apiMethod = BedrockAPIMethod.Converse // Unified API
+    )
+)
+```
+
+**Advantages:**
+- Consistent interface
+- Supports all model families
+- Easier to switch models
+
+### InvokeModel API
+
+Model-specific format:
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = credentialsProvider,
+    settings = BedrockClientSettings(
+        region = "us-east-1",
+        apiMethod = BedrockAPIMethod.InvokeModel // Model-specific
+    )
+)
+```
+
+**Use when:**
+- You need model-specific features
+- Working with legacy code
+
+## Code Examples
+
+### Basic Chat Completion
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = DefaultChainCredentialsProvider(),
+    settings = BedrockClientSettings(region = "us-east-1")
+)
+
+val result = client.execute(
+    prompt = prompt {
+        system("You are a helpful assistant.")
+        user("What is machine learning?")
+    },
+    model = BedrockModels.Claude.Sonnet4_5
+)
+
+println(result.first().content)
+```
+
+### Function Calling
+
+```kotlin
+data class WeatherArgs(val location: String)
+
+val weatherTool = tool<WeatherArgs, String>(
+    name = "get_weather",
+    description = "Get current weather"
+) { args ->
+    "Sunny, 22°C in ${args.location}"
+}
+
+val client = BedrockLLMClient(
+    identityProvider = DefaultChainCredentialsProvider(),
+    settings = BedrockClientSettings(region = "us-east-1")
+)
+
+val agent = AIAgent(
+    executor = client,
+    tools = toolRegistry { tool(weatherTool) }
+) {
+    defineGraph<String, String>("weather") {
+        val response = callLLM()
+        finish(response)
+    }
+}
+
+val result = agent.execute("What's the weather in Seattle?")
+```
+
+### Vision (Image Analysis)
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = DefaultChainCredentialsProvider(),
+    settings = BedrockClientSettings(region = "us-east-1")
+)
+
+val result = client.execute(
+    prompt = prompt {
+        user {
+            text("What's in this image?")
+            image(
+                bytes = File("image.jpg").readBytes(),
+                mimeType = "image/jpeg"
+            )
+        }
+    },
+    model = BedrockModels.Claude.Sonnet4_5
+)
+```
+
+### Streaming Responses
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = DefaultChainCredentialsProvider(),
+    settings = BedrockClientSettings(region = "us-east-1")
+)
+
+client.executeStreaming(
+    prompt = prompt { user("Write a story") },
+    model = BedrockModels.Claude.Sonnet4_5
+).collect { frame ->
+    when (frame) {
+        is StreamFrame.TextDelta -> print(frame.text)
+        is StreamFrame.End -> println("\nDone!")
+        else -> {}
+    }
+}
+```
+
+### Content Moderation with Guardrails
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = DefaultChainCredentialsProvider(),
+    settings = BedrockClientSettings(
+        region = "us-east-1",
+        moderationGuardrailsSettings = BedrockGuardrailsSettings(
+            guardrailIdentifier = "your-guardrail-id",
+            guardrailVersion = "1"
+        )
+    )
+)
+
+val result = client.moderate(
+    prompt = prompt { user("Some content to check") },
+    model = BedrockModels.Claude.Sonnet4_5 // Model not used, guardrails are model-independent
+)
+
+if (result.isHarmful) {
+    println("Content flagged: ${result.categories}")
+}
+```
+
+### Embeddings
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = DefaultChainCredentialsProvider(),
+    settings = BedrockClientSettings(region = "us-east-1")
+)
+
+val embedding = client.embed(
+    text = "The quick brown fox jumps over the lazy dog",
+    model = BedrockModels.Embeddings.TitanEmbedV2
+)
+
+println("Embedding dimensions: ${embedding.size}")
+```
+
+## Advanced Configuration
+
+### Custom Endpoint
+
+For VPC endpoints or testing:
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = credentialsProvider,
+    settings = BedrockClientSettings(
+        region = "us-east-1",
+        endpointUrl = "https://vpce-xxx.bedrock-runtime.us-east-1.vpce.amazonaws.com"
+    )
+)
+```
+
+### Fallback Model Family
+
+Handle unsupported models:
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = credentialsProvider,
+    settings = BedrockClientSettings(
+        region = "us-east-1",
+        fallbackModelFamily = BedrockModelFamilies.AnthropicClaude
+    )
+)
+```
+
+### Retry Configuration
+
+```kotlin
+val client = BedrockLLMClient(
+    identityProvider = credentialsProvider,
+    settings = BedrockClientSettings(
+        region = "us-east-1",
+        maxRetries = 5,
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 300_000 // 5 minutes
+        )
+    )
+)
+```
+
+## AWS Guardrails
+
+Bedrock Guardrails provide content filtering:
+
+### Setup Guardrail
+
+1. Create guardrail in AWS Console
+2. Configure content filters:
+   - Hate speech
+   - Violence
+   - Sexual content
+   - Prompt attacks
+   - Custom topics
+
+### Use in Code
+
+```kotlin
+val settings = BedrockClientSettings(
+    region = "us-east-1",
+    moderationGuardrailsSettings = BedrockGuardrailsSettings(
+        guardrailIdentifier = "abc123def",
+        guardrailVersion = "DRAFT" // or "1", "2", etc.
+    )
+)
+
+val client = BedrockLLMClient(credentialsProvider, settings)
+
+// Moderate input
+val result = client.moderate(
+    prompt = prompt { user("User input to check") },
+    model = BedrockModels.Claude.Sonnet4_5
+)
+
+if (result.isHarmful) {
+    // Handle violation
+    result.categories.forEach { (category, result) ->
+        if (result.detected) {
+            println("Flagged: $category")
+        }
+    }
+}
+```
+
+## Model Capabilities
+
+| Model Family | Context | Vision | Tools | Embeddings |
+|--------------|---------|--------|-------|------------|
+| Claude | 200K | ✅ | ✅ | ❌ |
+| Nova | Varies | ✅ | ✅ | ❌ |
+| Llama | 128K | ❌ | ✅ | ❌ |
+| Titan | - | ❌ | ❌ | ✅ |
+| Cohere | - | ❌ | ❌ | ✅ |
+
+## Pricing
+
+Pricing varies by model family and region. See [AWS Bedrock Pricing](https://aws.amazon.com/bedrock/pricing/).
+
+**Example costs (per 1M tokens, us-east-1):**
+- Claude Sonnet: $3 (input) / $15 (output)
+- Nova Pro: ~$0.80 (input) / ~$3.20 (output)
+- Llama 3.1 70B: ~$1 (input) / ~$1.30 (output)
+
+## Best Practices
+
+1. **Use Converse API** for new projects
+2. **Enable Guardrails** for production content filtering
+3. **Use VPC endpoints** for security
+4. **Implement retry logic** for transient failures
+5. **Monitor with CloudWatch** for usage and performance
+6. **Choose right model family** for your use case
+
+## Advantages
+
+- **Enterprise-ready**: Compliance, security, governance
+- **AWS integration**: IAM, VPC, CloudWatch, etc.
+- **Multiple models**: Choose best for each task
+- **Guardrails**: Built-in content filtering
+- **Pay-as-you-go**: No upfront costs
+- **Regional deployment**: Data residency control
+
+## Limitations
+
+- **JVM-only**: Not available for JavaScript/Native targets
+- **AWS dependency**: Requires AWS account and configuration
+- **Region availability**: Not all models in all regions
+- **Initial setup**: More complex than API-key providers
+
+## Troubleshooting
+
+### Authentication Errors
+
+```kotlin
+try {
+    val result = client.execute(prompt { user("Hello") }, model)
+} catch (e: Exception) {
+    when {
+        e.message?.contains("credentials") == true -> {
+            // Check AWS credentials configuration
+        }
+        e.message?.contains("access denied") == true -> {
+            // Check IAM permissions
+        }
+    }
+}
+```
+
+### Model Not Available
+
+```kotlin
+try {
+    val result = client.execute(prompt { user("Hello") }, model)
+} catch (e: LLMClientException) {
+    if (e.message?.contains("model") == true) {
+        // Check model availability in your region
+        // Some models require enabling in AWS console
+    }
+}
+```
+
+### Required IAM Permissions
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:Converse",
+        "bedrock:ConverseStream",
+        "bedrock:ApplyGuardrail"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+## Resources
+
+- [AWS Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
+- [Model Access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html)
+- [Guardrails Guide](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)
+- [Pricing](https://aws.amazon.com/bedrock/pricing/)
+- [API Reference](/api-reference/llm-providers/bedrock)

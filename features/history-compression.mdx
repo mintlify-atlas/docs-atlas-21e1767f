@@ -1,0 +1,464 @@
+---
+title: History Compression
+description: Intelligent conversation history compression to manage context limits
+---
+
+History Compression addresses the challenge of context window limits by intelligently condensing conversation history while preserving critical information. This enables agents to handle longer interactions without losing important context.
+
+## The Problem: Context Window Limits
+
+LLMs have finite context windows (e.g., 128K tokens for GPT-4). Long-running agents face challenges:
+
+- **Token accumulation**: Each tool call adds messages to history
+- **Context overflow**: Eventually exceeds the model's limit
+- **Information loss**: Simple truncation loses important context
+- **Cost increase**: More tokens = higher API costs
+
+## The Solution: Memory-Based Compression
+
+Koog's history compression uses the **Memory feature** to extract and preserve facts before compressing history:
+
+1. **Extract facts**: Use LLM to identify key information from conversation
+2. **Store as concepts**: Save facts to memory as structured concepts
+3. **Compress history**: Replace verbose history with fact summaries
+4. **Inject context**: Load facts back into prompt when needed
+
+## Installation
+
+History compression is implemented through the Memory feature's compression strategy:
+
+```kotlin
+import ai.koog.agents.memory.feature.AgentMemory
+import ai.koog.agents.memory.feature.history.RetrieveFactsFromHistory
+import ai.koog.agents.memory.model.Concept
+import ai.koog.agents.memory.model.FactType
+
+// Define concepts to preserve
+val projectConcept = Concept(
+    keyword = "project-structure",
+    description = "Project structure, modules, and important files",
+    factType = FactType.MULTIPLE
+)
+
+val dependenciesConcept = Concept(
+    keyword = "dependencies",
+    description = "Project dependencies and versions",
+    factType = FactType.MULTIPLE
+)
+
+val agent = AIAgent(
+    executor = myExecutor,
+    strategy = myStrategy
+) {
+    install(AgentMemory) {
+        memoryProvider = myMemoryProvider
+        
+        // Configure history compression
+        historyCompressionStrategy = RetrieveFactsFromHistory(
+            concepts = listOf(
+                projectConcept,
+                dependenciesConcept
+            )
+        )
+    }
+}
+```
+
+## How It Works
+
+### 1. Facts Extraction
+
+When compression is triggered, the LLM extracts facts:
+
+```kotlin
+// Conversation before compression:
+User: What dependencies does this project use?
+Assistant: The project uses Kotlin 1.9, Ktor 2.3, and kotlinx.serialization.
+User: What's the project structure?
+Assistant: It has three modules: core, api, and client.
+User: [many more messages...]
+
+// Extracted facts:
+Concept: dependencies
+Facts:
+  - Kotlin 1.9
+  - Ktor 2.3
+  - kotlinx.serialization
+  
+Concept: project-structure
+Facts:
+  - Module: core
+  - Module: api  
+  - Module: client
+```
+
+### 2. History Compression
+
+Verbose history is replaced with a fact summary:
+
+```kotlin
+// Compressed history:
+Assistant: [CONTEXT RESTORATION INITIATED]
+I was working on this task when I needed to compress history due to context limits.
+
+**Compressed Working Memory:**
+## KNOWN FACTS ABOUT `dependencies` (Project dependencies)
+- Kotlin 1.9
+- Ktor 2.3
+- kotlinx.serialization
+
+## KNOWN FACTS ABOUT `project-structure` (Project structure)
+- Module: core
+- Module: api
+- Module: client
+
+**Current Status:**
+I've been actively working through approximately 15 tool interactions.
+The above summary represents key findings from my work so far.
+
+User: Yes, that's correct. Please continue from where you left off.
+```
+
+### 3. Context Preservation
+
+Critical information is preserved:
+
+- ✅ Extracted facts (structured knowledge)
+- ✅ Last tool call and result (immediate context)
+- ✅ Memory-tagged messages (marked as important)
+- ❌ Verbose intermediate steps (compressed away)
+
+## Configuration
+
+### Define Concepts
+
+Choose what to preserve based on your use case:
+
+```kotlin
+// Code analysis agent
+val codeConcepts = listOf(
+    Concept(
+        "code-issues",
+        "Issues and bugs found in the code",
+        FactType.MULTIPLE
+    ),
+    Concept(
+        "suggested-fixes",
+        "Suggested fixes and improvements",
+        FactType.MULTIPLE
+    ),
+    Concept(
+        "code-quality-score",
+        "Overall code quality assessment",
+        FactType.SINGLE
+    )
+)
+
+// Research agent
+val researchConcepts = listOf(
+    Concept(
+        "key-findings",
+        "Important findings and insights",
+        FactType.MULTIPLE
+    ),
+    Concept(
+        "sources",
+        "Referenced sources and citations",
+        FactType.MULTIPLE
+    ),
+    Concept(
+        "research-conclusion",
+        "Main conclusion of the research",
+        FactType.SINGLE
+    )
+)
+
+// Planning agent
+val planningConcepts = listOf(
+    Concept(
+        "completed-steps",
+        "Steps that have been completed",
+        FactType.MULTIPLE
+    ),
+    Concept(
+        "pending-tasks",
+        "Tasks still to be done",
+        FactType.MULTIPLE
+    ),
+    Concept(
+        "blockers",
+        "Identified blockers and issues",
+        FactType.MULTIPLE
+    )
+)
+```
+
+### Compression Strategy
+
+```kotlin
+import ai.koog.agents.memory.feature.history.RetrieveFactsFromHistory
+
+install(AgentMemory) {
+    memoryProvider = myMemoryProvider
+    
+    // Single concept
+    historyCompressionStrategy = RetrieveFactsFromHistory(
+        Concept("task-progress", "Current task progress", FactType.SINGLE)
+    )
+    
+    // Multiple concepts
+    historyCompressionStrategy = RetrieveFactsFromHistory(
+        concepts = listOf(
+            concept1,
+            concept2,
+            concept3
+        )
+    )
+}
+```
+
+## Triggering Compression
+
+Compression is typically triggered manually when needed:
+
+```kotlin
+import ai.koog.agents.core.dsl.extension.compressHistory
+
+val processLargeTask by node<String, String> { task ->
+    // Check if history is getting too long
+    val messageCount = llm.prompt.messages.size
+    
+    if (messageCount > 50) {
+        // Trigger compression
+        llm.writeSession {
+            compressHistory()
+        }
+    }
+    
+    // Continue processing
+    requestLLM("Process: $task")
+}
+```
+
+### Automatic Compression (Advanced)
+
+Implement automatic compression based on token count:
+
+```kotlin
+val smartNode by node<String, String> { input ->
+    llm.writeSession {
+        // Estimate token count (rough approximation)
+        val estimatedTokens = prompt.messages.sumOf { it.content.length / 4 }
+        
+        if (estimatedTokens > 100000) {
+            println("Compressing history...")
+            compressHistory()
+        }
+    }
+    
+    requestLLM(input)
+}
+```
+
+## Complete Example
+
+```kotlin
+import ai.koog.agents.core.dsl.graphStrategy
+import ai.koog.agents.memory.feature.AgentMemory
+import ai.koog.agents.memory.feature.history.RetrieveFactsFromHistory
+import ai.koog.agents.memory.model.Concept
+import ai.koog.agents.memory.model.FactType
+import ai.koog.agents.core.dsl.extension.compressHistory
+
+// Define what to remember
+val filesConcept = Concept(
+    "analyzed-files",
+    "Files that have been analyzed",
+    FactType.MULTIPLE
+)
+
+val issuesConcept = Concept(
+    "found-issues",
+    "Issues discovered during analysis",
+    FactType.MULTIPLE
+)
+
+val progressConcept = Concept(
+    "analysis-progress",
+    "Current progress of the analysis",
+    FactType.SINGLE
+)
+
+val agent = AIAgent(
+    executor = openAIExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = graphStrategy {
+        val analyzeFile by node<String, String> { file ->
+            llm.writeSession {
+                // Check history size
+                if (prompt.messages.size > 30) {
+                    println("Compressing history to manage context...")
+                    compressHistory()
+                }
+            }
+            
+            // Analyze the file
+            requestLLM("Analyze this file: $file")
+        }
+        
+        val summarizeFindings by node<String, String> { analysis ->
+            requestLLM("Summarize findings: $analysis")
+        }
+        
+        edges {
+            start goesTo analyzeFile
+            analyzeFile goesTo summarizeFindings
+            summarizeFindings goesTo finish
+        }
+    }
+) {
+    install(AgentMemory) {
+        memoryProvider = LocalFileMemoryProvider(
+            config = LocalMemoryConfig("code-analyzer"),
+            storage = SimpleStorage(JVMFileSystemProvider),
+            root = Path("./memory")
+        )
+        
+        // Configure compression
+        historyCompressionStrategy = RetrieveFactsFromHistory(
+            concepts = listOf(
+                filesConcept,
+                issuesConcept,
+                progressConcept
+            )
+        )
+    }
+}
+
+// Process multiple files (history will be compressed as needed)
+val files = listOf("main.kt", "utils.kt", "data.kt", /* ... many more ... */)
+files.forEach { file ->
+    agent.run("Analyze $file")
+}
+```
+
+## Benefits
+
+<AccordionGroup>
+  <Accordion title="Extended conversations">
+    Handle much longer interactions without hitting context limits.
+  </Accordion>
+  
+  <Accordion title="Preserved context">
+    Important facts are extracted and preserved, not lost in truncation.
+  </Accordion>
+  
+  <Accordion title="Cost reduction">
+    Fewer tokens in context = lower API costs for each LLM call.
+  </Accordion>
+  
+  <Accordion title="Better focus">
+    Compressed summaries help the LLM focus on relevant information.
+  </Accordion>
+  
+  <Accordion title="Flexible compression">
+    Choose which concepts to preserve based on your use case.
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Define domain-specific concepts">
+    Tailor concepts to your agent's purpose. A code analyzer needs different concepts than a research assistant.
+  </Accordion>
+  
+  <Accordion title="Use MULTIPLE for collections">
+    Use `FactType.MULTIPLE` for concepts that naturally have many values (issues, files, findings).
+  </Accordion>
+  
+  <Accordion title="Monitor compression triggers">
+    Track when compression happens to tune your thresholds appropriately.
+  </Accordion>
+  
+  <Accordion title="Preserve last interactions">
+    The compression strategy automatically preserves the last tool call/result for continuity.
+  </Accordion>
+  
+  <Accordion title="Test with real workloads">
+    Verify that compressed agents maintain quality with your actual use cases.
+  </Accordion>
+</AccordionGroup>
+
+## When to Use
+
+**Use history compression when:**
+
+- ✅ Agent handles long, multi-step tasks
+- ✅ Multiple tool calls accumulate in history
+- ✅ Context window limits are a concern
+- ✅ You can define clear concepts to preserve
+- ✅ Cost optimization is important
+
+**Don't use when:**
+
+- ❌ Conversations are already short
+- ❌ Every detail must be preserved verbatim
+- ❌ Immediate context is all that matters
+- ❌ Simplicity is more important than efficiency
+
+## Advanced: Custom Compression
+
+Implement your own compression strategy:
+
+```kotlin
+import ai.koog.agents.core.dsl.extension.HistoryCompressionStrategy
+import ai.koog.agents.core.agent.session.AIAgentLLMWriteSession
+import ai.koog.prompt.message.Message
+
+class CustomCompressionStrategy : HistoryCompressionStrategy() {
+    override suspend fun compress(
+        llmSession: AIAgentLLMWriteSession,
+        memoryMessages: List<Message>
+    ) {
+        // Custom compression logic
+        val summary = llmSession.requestLLM(
+            "Summarize this conversation in 3 bullet points"
+        )
+        
+        // Replace history with summary
+        llmSession.rewritePrompt {
+            Prompt.build {
+                system("Previous conversation summary: $summary")
+                user("Continue from here")
+            }
+        }
+    }
+}
+
+install(AgentMemory) {
+    memoryProvider = myMemoryProvider
+    historyCompressionStrategy = CustomCompressionStrategy()
+}
+```
+
+## Compression vs. Memory Preservation
+
+| Feature | History Compression | Memory (Facts) | Persistence (Checkpoints) |
+|---------|-------------------|----------------|---------------------------|
+| **Purpose** | Reduce token usage | Store structured knowledge | Save complete state |
+| **Duration** | Current session | Across sessions | Across sessions |
+| **Format** | LLM-generated summary | Structured facts | Complete snapshot |
+| **Use case** | Long conversations | Knowledge retention | Recovery/rollback |
+| **Overhead** | Low | Medium | High |
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Memory" icon="brain" href="/features/memory">
+    Underlying feature that powers history compression
+  </Card>
+  <Card title="Persistence" icon="floppy-disk" href="/features/persistence">
+    Save complete agent state with checkpoints
+  </Card>
+</CardGroup>

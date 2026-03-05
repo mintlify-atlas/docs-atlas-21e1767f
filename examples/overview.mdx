@@ -1,0 +1,175 @@
+---
+title: 'Examples Overview'
+description: 'Explore practical examples demonstrating the Koog AI agent framework'
+icon: 'code'
+---
+
+Welcome to the **Koog Framework Examples**! This collection showcases real-world implementations of AI agents built with Koog, from simple calculators to production-ready applications.
+
+## Available Examples
+
+Each example demonstrates different aspects of the Koog framework, with complete source code and step-by-step explanations.
+
+### Simple Agent Examples
+
+<Card title="Simple Agent Examples" icon="calculator" href="/examples/simple-agent">
+  A comprehensive collection of runnable examples demonstrating core Koog concepts:
+  - Calculator agents with tool calling
+  - Banking assistant with routing
+  - Structured output and streaming
+  - Memory and persistence patterns
+  - OpenTelemetry integration
+  
+  **Difficulty:** Beginner to Intermediate
+</Card>
+
+### Code Agent Tutorial
+
+<Card title="Building a Code Agent" icon="terminal" href="/examples/code-agent">
+  A progressive, 5-step tutorial building a production-grade coding agent:
+  - Step 1: Minimal agent with file operations
+  - Step 2: Add shell command execution
+  - Step 3: Integrate observability (Langfuse)
+  - Step 4: Add specialized sub-agents
+  - Step 5: Implement history compression
+  
+  **Difficulty:** Intermediate
+</Card>
+
+### Trip Planning Agent
+
+<Card title="Trip Planning Agent" icon="map" href="/examples/trip-planning">
+  An advanced agent that plans trips by integrating multiple APIs:
+  - Google Maps via MCP (Model Context Protocol)
+  - Weather forecasts from Open Meteo
+  - Interactive user conversations
+  - Complex graph-based strategy
+  
+  **Difficulty:** Advanced
+</Card>
+
+### ACP Agent Integration
+
+<Card title="ACP Agent for IDEs" icon="plug" href="/examples/acp-agent">
+  Connect Koog agents to IntelliJ IDEA using the Agent Communication Protocol:
+  - File operations and code navigation
+  - IDE integration patterns
+  - Bidirectional communication
+  - Session management
+  
+  **Difficulty:** Advanced
+</Card>
+
+### Spring Boot Integration
+
+<Card title="Spring Boot Integration" icon="leaf" href="/examples/spring-boot-integration">
+  Production-ready Spring Boot application with Koog agents:
+  - REST API for chat interactions
+  - MCP server integration (GitHub)
+  - S3 persistence for agent state
+  - Configurable via YAML
+  
+  **Difficulty:** Intermediate
+</Card>
+
+## Quick Start
+
+All examples are available in the [Koog GitHub repository](https://github.com/koogio/koog):
+
+```bash
+git clone https://github.com/koogio/koog.git
+cd koog/examples
+```
+
+## Prerequisites
+
+Before running the examples, ensure you have:
+
+- **Java 17+** installed
+- **Kotlin 1.9+** (included with Gradle)
+- **API Keys** for LLM providers:
+  - OpenAI API key (most examples)
+  - Anthropic API key (optional)
+  - Google AI API key (optional)
+
+## Setting Up API Keys
+
+Set your API keys as environment variables:
+
+<CodeGroup>
+```bash macOS/Linux
+export OPENAI_API_KEY="your_openai_key"
+export ANTHROPIC_API_KEY="your_anthropic_key"
+export GOOGLE_AI_API_KEY="your_google_key"
+```
+
+```bash Windows
+set OPENAI_API_KEY=your_openai_key
+set ANTHROPIC_API_KEY=your_anthropic_key
+set GOOGLE_AI_API_KEY=your_google_key
+```
+</CodeGroup>
+
+Or create an `env.properties` file in your project root:
+
+```properties
+OPENAI_API_KEY=your_openai_key
+ANTHROPIC_API_KEY=your_anthropic_key
+GOOGLE_AI_API_KEY=your_google_key
+```
+
+## Example Difficulty Levels
+
+<AccordionGroup>
+  <Accordion title="Beginner" icon="seedling">
+    Examples with minimal complexity, perfect for learning basic Koog concepts:
+    - Simple calculator agents
+    - Basic tool calling
+    - Single-run strategies
+  </Accordion>
+
+  <Accordion title="Intermediate" icon="chart-line">
+    Examples demonstrating more complex patterns:
+    - Multi-agent routing
+    - Event handling and observability
+    - Structured output
+    - State persistence
+  </Accordion>
+
+  <Accordion title="Advanced" icon="rocket">
+    Production-ready implementations with advanced features:
+    - Complex graph strategies
+    - Multi-API integration
+    - MCP protocol integration
+    - History compression
+    - Sub-agent orchestration
+  </Accordion>
+</AccordionGroup>
+
+## Learning Path
+
+We recommend exploring examples in this order:
+
+1. **Start with [Simple Agent Examples](/examples/simple-agent)** to understand core concepts
+2. **Follow the [Code Agent Tutorial](/examples/code-agent)** to build a complete agent step-by-step
+3. **Explore [Trip Planning](/examples/trip-planning)** for advanced multi-API integration
+4. **Try [Spring Boot Integration](/examples/spring-boot-integration)** for production deployment
+5. **Experiment with [ACP Agent](/examples/acp-agent)** for IDE integration
+
+## Additional Resources
+
+- **Interactive Notebooks**: Jupyter notebooks for hands-on learning in the `examples/notebooks/` directory
+- **API Reference**: Detailed API documentation at [api.koog.ai](https://api.koog.ai)
+- **Community**: Join discussions on [GitHub](https://github.com/koogio/koog/discussions)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Simple Agent Examples" icon="play" href="/examples/simple-agent">
+    Start with basic examples
+  </Card>
+  
+  <Card title="Code Agent Tutorial" icon="graduation-cap" href="/examples/code-agent">
+    Build a coding agent step-by-step
+  </Card>
+</CardGroup>

@@ -1,0 +1,454 @@
+---
+title: PromptExecutor
+description: Executor for interacting with language models and processing prompts
+---
+
+## Overview
+
+`PromptExecutor` is responsible for executing prompts against language models, handling streaming responses, and managing LLM interactions. It serves as the bridge between the agent framework and underlying LLM providers.
+
+<Note>
+  In agent contexts, the executor is wrapped by `ContextualPromptExecutor` which adds feature pipeline integration and event interception.
+</Note>
+
+## Class Definition
+
+```kotlin
+public abstract class PromptExecutor : Closeable
+```
+
+## Core Methods
+
+### execute
+
+Executes a prompt and returns the response messages.
+
+```kotlin
+public abstract suspend fun execute(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>
+): List<Message.Response>
+```
+
+<ParamField path="prompt" type="Prompt" required>
+  The prompt to send to the language model, containing messages and configuration
+</ParamField>
+
+<ParamField path="model" type="LLModel" required>
+  The language model to use for execution
+</ParamField>
+
+<ParamField path="tools" type="List<ToolDescriptor>" required>
+  List of tool descriptors available for the LLM to use
+</ParamField>
+
+<ResponseField name="return" type="List<Message.Response>">
+  List of response messages from the language model. Typically contains one response, but may contain multiple for choice-based models.
+</ResponseField>
+
+### executeStreaming
+
+Executes a streaming call to the language model.
+
+```kotlin
+public abstract fun executeStreaming(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>
+): Flow<StreamFrame>
+```
+
+<ParamField path="prompt" type="Prompt" required>
+  The prompt to send to the language model
+</ParamField>
+
+<ParamField path="model" type="LLModel" required>
+  The language model to use for streaming
+</ParamField>
+
+<ParamField path="tools" type="List<ToolDescriptor>" required>
+  List of available tool descriptors
+</ParamField>
+
+<ResponseField name="return" type="Flow<StreamFrame>">
+  A Flow of StreamFrame objects representing the streaming response. Each frame contains partial response data.
+</ResponseField>
+
+### executeMultipleChoices
+
+Executes a prompt with multiple choice generation.
+
+```kotlin
+public abstract suspend fun executeMultipleChoices(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>
+): List<LLMChoice>
+```
+
+<ParamField path="prompt" type="Prompt" required>
+  The prompt to send to the language model
+</ParamField>
+
+<ParamField path="model" type="LLModel" required>
+  The language model to use
+</ParamField>
+
+<ParamField path="tools" type="List<ToolDescriptor>" required>
+  List of available tool descriptors
+</ParamField>
+
+<ResponseField name="return" type="List<LLMChoice>">
+  List of choice objects, each containing a sequence of response messages
+</ResponseField>
+
+### moderate
+
+Executes content moderation on a prompt.
+
+```kotlin
+public abstract suspend fun moderate(
+    prompt: Prompt,
+    model: LLModel
+): ModerationResult
+```
+
+<ParamField path="prompt" type="Prompt" required>
+  The prompt to moderate
+</ParamField>
+
+<ParamField path="model" type="LLModel" required>
+  The language model to use for moderation
+</ParamField>
+
+<ResponseField name="return" type="ModerationResult">
+  The moderation result indicating whether content violates policies
+</ResponseField>
+
+### models
+
+Retrieves available language models.
+
+```kotlin
+public abstract suspend fun models(): List<LLModel>
+```
+
+<ResponseField name="return" type="List<LLModel>">
+  List of available language models from the provider
+</ResponseField>
+
+## Schema Generation
+
+### getStandardJsonSchemaGenerator
+
+Gets a JSON schema generator for structured outputs.
+
+```kotlin
+public abstract fun getStandardJsonSchemaGenerator(
+    model: LLModel
+): StandardJsonSchemaGenerator
+```
+
+<ParamField path="model" type="LLModel" required>
+  The language model to generate schemas for
+</ParamField>
+
+<ResponseField name="return" type="StandardJsonSchemaGenerator">
+  Schema generator for creating JSON schemas from Kotlin types
+</ResponseField>
+
+### getBasicJsonSchemaGenerator
+
+Gets a basic JSON schema generator.
+
+```kotlin
+public abstract fun getBasicJsonSchemaGenerator(
+    model: LLModel
+): BasicJsonSchemaGenerator
+```
+
+<ParamField path="model" type="LLModel" required>
+  The language model to generate schemas for
+</ParamField>
+
+<ResponseField name="return" type="BasicJsonSchemaGenerator">
+  Basic schema generator for simpler JSON schema needs
+</ResponseField>
+
+## ContextualPromptExecutor
+
+Wraps PromptExecutor with feature pipeline integration:
+
+```kotlin
+public class ContextualPromptExecutor(
+    private val executor: PromptExecutor,
+    private val context: AIAgentContext
+) : PromptExecutor()
+```
+
+The contextual wrapper:
+- Triggers pipeline events before and after LLM calls
+- Allows features to intercept and modify prompts
+- Provides logging and debugging information
+- Integrates with agent execution lifecycle
+
+## Usage Examples
+
+### Basic Execution
+
+```kotlin
+val executor = PromptExecutor.create(
+    apiKey = "your-api-key",
+    provider = LLMProvider.OPENAI
+)
+
+val prompt = Prompt {
+    user("What is the capital of France?")
+}
+
+val model = LLModel.GPT4
+
+val responses = executor.execute(
+    prompt = prompt,
+    model = model,
+    tools = emptyList()
+)
+
+println(responses.first().content)
+
+executor.close()
+```
+
+### Streaming Response
+
+```kotlin
+val executor = PromptExecutor.create(
+    apiKey = apiKey,
+    provider = LLMProvider.ANTHROPIC
+)
+
+val prompt = Prompt {
+    user("Tell me a story")
+}
+
+executor.executeStreaming(
+    prompt = prompt,
+    model = LLModel.CLAUDE_3_5_SONNET,
+    tools = emptyList()
+).collect { frame ->
+    when (frame) {
+        is StreamFrame.Content -> print(frame.text)
+        is StreamFrame.Done -> println("\nDone!")
+        else -> { /* handle other frames */ }
+    }
+}
+
+executor.close()
+```
+
+### With Tools
+
+```kotlin
+val tools = listOf(
+    SearchTool().descriptor,
+    CalculatorTool().descriptor
+)
+
+val prompt = Prompt {
+    system("You are a helpful assistant with access to tools")
+    user("What is the weather in Paris?")
+}
+
+val responses = executor.execute(
+    prompt = prompt,
+    model = model,
+    tools = tools
+)
+
+// Handle potential tool calls
+responses.forEach { response ->
+    when (response) {
+        is Message.Assistant.ToolCall -> {
+            println("LLM wants to call: ${response.toolCalls}")
+        }
+        is Message.Assistant.Text -> {
+            println("Response: ${response.content}")
+        }
+    }
+}
+```
+
+### Multiple Choices
+
+```kotlin
+val prompt = Prompt {
+    user("Generate creative names for a coffee shop")
+}
+
+val choices = executor.executeMultipleChoices(
+    prompt = prompt,
+    model = model.copy(numberOfChoices = 3),
+    tools = emptyList()
+)
+
+choices.forEachIndexed { index, choice ->
+    println("Choice ${index + 1}: ${choice.first().content}")
+}
+```
+
+### Content Moderation
+
+```kotlin
+val prompt = Prompt {
+    user(userInput)
+}
+
+val moderationResult = executor.moderate(
+    prompt = prompt,
+    model = model
+)
+
+if (moderationResult.flagged) {
+    println("Content flagged: ${moderationResult.categories}")
+} else {
+    // Safe to proceed
+    val response = executor.execute(prompt, model, tools)
+}
+```
+
+### In Agent Context
+
+When used within an agent, the executor is automatically wrapped:
+
+```kotlin
+class MyStrategy : AIAgentGraphStrategy<String, String> {
+    override val name = "my-strategy"
+    
+    override suspend fun execute(
+        context: AIAgentGraphContext,
+        input: String
+    ): String? {
+        // The context.llm uses ContextualPromptExecutor internally
+        // This triggers pipeline events and feature interception
+        val response = context.llm.prompt {
+            user(input)
+        }.execute()
+        
+        return response.content
+    }
+}
+```
+
+## Provider-Specific Executors
+
+Create executors for specific providers:
+
+```kotlin
+// OpenAI
+val openAIExecutor = OpenAIPromptExecutor(
+    apiKey = openAIKey,
+    organization = "org-id"
+)
+
+// Anthropic
+val anthropicExecutor = AnthropicPromptExecutor(
+    apiKey = anthropicKey
+)
+
+// Google (Gemini)
+val geminiExecutor = GeminiPromptExecutor(
+    apiKey = geminiKey
+)
+
+// OpenRouter
+val openRouterExecutor = OpenRouterPromptExecutor(
+    apiKey = openRouterKey
+)
+
+// Ollama (local)
+val ollamaExecutor = OllamaPromptExecutor(
+    baseUrl = "http://localhost:11434"
+)
+```
+
+## Feature Pipeline Integration
+
+The ContextualPromptExecutor integrates with the agent pipeline:
+
+```kotlin
+// Features can intercept LLM calls
+pipeline.interceptLLMCallStarting(feature) { eventContext ->
+    // Modify the prompt before execution
+    eventContext.context.llm.prompt = Prompt {
+        system("Enhanced system prompt")
+        messages(eventContext.prompt.messages)
+    }
+}
+
+pipeline.interceptLLMCallCompleted(feature) { eventContext ->
+    // Process responses after execution
+    eventContext.responses.forEach { response ->
+        println("LLM said: ${response.content}")
+    }
+}
+```
+
+## Best Practices
+
+<Note>
+  **Resource Management**
+  
+  - Always close the executor when done using `executor.close()`
+  - Use `use { }` blocks for automatic cleanup
+  - Executors maintain HTTP clients and connections
+  - Don't create multiple executors unnecessarily
+</Note>
+
+<Warning>
+  **Error Handling**
+  
+  - LLM calls can fail due to network issues, rate limits, or API errors
+  - Implement retry logic for transient failures
+  - Handle timeout exceptions appropriately
+  - Validate API keys and credentials before use
+</Warning>
+
+## Testing
+
+Mock executors for testing:
+
+```kotlin
+val mockExecutor = object : PromptExecutor() {
+    override suspend fun execute(
+        prompt: Prompt,
+        model: LLModel,
+        tools: List<ToolDescriptor>
+    ): List<Message.Response> {
+        return listOf(
+            Message.Assistant.Text("Mocked response")
+        )
+    }
+    
+    // Implement other abstract methods...
+}
+```
+
+Or use the testing utilities:
+
+```kotlin
+val mockExecutor = getMockExecutor(toolRegistry, eventHandler) {
+    mockLLMAnswer("Hello!") onRequestContains "Hello"
+    mockLLMAnswer("Default response").asDefaultResponse
+}
+```
+
+## Related Types
+
+- [AIAgent](/api/ai-agent) - Uses executor for LLM communication
+- [AIAgentStrategy](/api/ai-agent-strategy) - Accesses executor through context
+- [ToolDescriptor](/api/tool-descriptors) - Tool schemas passed to executor
+
+## Source Reference
+
+Defined in: `agents-core/src/commonMain/kotlin/ai/koog/agents/core/feature/ContextualPromptExecutor.kt`

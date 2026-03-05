@@ -1,0 +1,579 @@
+---
+title: AIAgentFeature
+description: Interface for creating extensible agent capabilities through the feature system
+---
+
+## Overview
+
+`AIAgentFeature` is the interface for creating modular, installable capabilities that extend agent behavior. Features integrate with the agent pipeline to intercept lifecycle events, modify behavior, and add functionality.
+
+<Note>
+  Features are the primary extension mechanism in Koog. They provide lifecycle hooks, configuration management, and storage integration.
+</Note>
+
+## Base Interface
+
+```kotlin
+public interface AIAgentFeature<TConfig : FeatureConfig, TFeatureImpl : Any>
+```
+
+### Type Parameters
+
+<ParamField path="TConfig" type="FeatureConfig">
+  The type representing the configuration for this feature
+</ParamField>
+
+<ParamField path="TFeatureImpl" type="Any">
+  The type of the feature implementation that will be installed
+</ParamField>
+
+## Properties
+
+<ResponseField name="key" type="AIAgentStorageKey<TFeatureImpl>" required>
+  A unique key used to identify and store the feature instance within the agent
+</ResponseField>
+
+## Methods
+
+### createInitialConfig
+
+Creates and returns an initial configuration for the feature.
+
+```kotlin
+public fun createInitialConfig(): TConfig
+```
+
+<ResponseField name="return" type="TConfig">
+  The initial configuration instance for this feature
+</ResponseField>
+
+## Specialized Feature Interfaces
+
+### AIAgentGraphFeature
+
+Feature for graph-based agents.
+
+```kotlin
+public interface AIAgentGraphFeature<TConfig : FeatureConfig, TFeatureImpl : Any> : 
+    AIAgentFeature<TConfig, TFeatureImpl> {
+    
+    public fun install(
+        config: TConfig,
+        pipeline: AIAgentGraphPipeline
+    ): TFeatureImpl
+}
+```
+
+<ParamField path="config" type="TConfig" required>
+  The configuration for the feature
+</ParamField>
+
+<ParamField path="pipeline" type="AIAgentGraphPipeline" required>
+  The graph pipeline to install the feature into
+</ParamField>
+
+<ResponseField name="return" type="TFeatureImpl">
+  The installed feature implementation instance
+</ResponseField>
+
+### AIAgentFunctionalFeature
+
+Feature for functional-style agents.
+
+```kotlin
+public interface AIAgentFunctionalFeature<TConfig : FeatureConfig, TFeatureImpl : Any> : 
+    AIAgentFeature<TConfig, TFeatureImpl> {
+    
+    public fun install(
+        config: TConfig,
+        pipeline: AIAgentFunctionalPipeline
+    ): TFeatureImpl
+}
+```
+
+### AIAgentPlannerFeature
+
+Feature for planner-based agents.
+
+```kotlin
+public interface AIAgentPlannerFeature<TConfig : FeatureConfig, TFeatureImpl : Any> : 
+    AIAgentFeature<TConfig, TFeatureImpl> {
+    
+    public fun install(
+        config: TConfig,
+        pipeline: AIAgentPlannerPipeline
+    ): TFeatureImpl
+}
+```
+
+## Feature Configuration
+
+All feature configurations must extend `FeatureConfig`:
+
+```kotlin
+public interface FeatureConfig
+```
+
+## Creating a Custom Feature
+
+### Basic Feature Implementation
+
+```kotlin
+// 1. Define configuration
+class LoggingFeatureConfig : FeatureConfig {
+    var logLevel: LogLevel = LogLevel.INFO
+    var includeToolCalls: Boolean = true
+    var includePrompts: Boolean = false
+}
+
+// 2. Define feature implementation
+class LoggingFeatureImpl(
+    private val config: LoggingFeatureConfig,
+    private val pipeline: AIAgentGraphPipeline
+) {
+    private val logger = KotlinLogging.logger {}
+    
+    fun logMessage(message: String) {
+        when (config.logLevel) {
+            LogLevel.DEBUG -> logger.debug { message }
+            LogLevel.INFO -> logger.info { message }
+            LogLevel.WARN -> logger.warn { message }
+            LogLevel.ERROR -> logger.error { message }
+        }
+    }
+}
+
+// 3. Create feature
+object LoggingFeature : AIAgentGraphFeature<LoggingFeatureConfig, LoggingFeatureImpl> {
+    override val key = AIAgentStorageKey<LoggingFeatureImpl>("logging")
+    
+    override fun createInitialConfig() = LoggingFeatureConfig()
+    
+    override fun install(
+        config: LoggingFeatureConfig,
+        pipeline: AIAgentGraphPipeline
+    ): LoggingFeatureImpl {
+        val impl = LoggingFeatureImpl(config, pipeline)
+        
+        // Install interceptors
+        pipeline.interceptLLMCallStarting(this) { context ->
+            if (config.includePrompts) {
+                impl.logMessage(
+                    "LLM Call: ${context.prompt.messages.last().content}"
+                )
+            }
+        }
+        
+        pipeline.interceptToolCallStarting(this) { context ->
+            if (config.includeToolCalls) {
+                impl.logMessage(
+                    "Tool Call: ${context.toolName}(${context.toolArgs})"
+                )
+            }
+        }
+        
+        return impl
+    }
+}
+```
+
+### Installing Features
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = executor,
+    agentConfig = config,
+    strategy = strategy,
+    toolRegistry = tools
+) {
+    // Install with default config
+    install(LoggingFeature)
+    
+    // Install with custom config
+    install(LoggingFeature) {
+        logLevel = LogLevel.DEBUG
+        includeToolCalls = true
+        includePrompts = true
+    }
+}
+```
+
+## Feature Examples
+
+### Memory Feature
+
+Stores conversation history:
+
+```kotlin
+class MemoryFeatureConfig : FeatureConfig {
+    var maxMessages: Int = 100
+    var persistToFile: Boolean = false
+    var filePath: String? = null
+}
+
+class MemoryFeatureImpl(
+    private val config: MemoryFeatureConfig
+) {
+    private val messages = mutableListOf<Message>()
+    
+    fun addMessage(message: Message) {
+        messages.add(message)
+        if (messages.size > config.maxMessages) {
+            messages.removeAt(0)
+        }
+    }
+    
+    fun getMessages(): List<Message> = messages.toList()
+    
+    fun clear() = messages.clear()
+}
+
+object MemoryFeature : AIAgentGraphFeature<MemoryFeatureConfig, MemoryFeatureImpl> {
+    override val key = AIAgentStorageKey<MemoryFeatureImpl>("memory")
+    
+    override fun createInitialConfig() = MemoryFeatureConfig()
+    
+    override fun install(
+        config: MemoryFeatureConfig,
+        pipeline: AIAgentGraphPipeline
+    ): MemoryFeatureImpl {
+        val impl = MemoryFeatureImpl(config)
+        
+        // Store LLM messages
+        pipeline.interceptLLMCallCompleted(this) { context ->
+            context.responses.forEach { response ->
+                impl.addMessage(response)
+            }
+        }
+        
+        return impl
+    }
+}
+```
+
+### Retry Feature
+
+Retries failed operations:
+
+```kotlin
+class RetryFeatureConfig : FeatureConfig {
+    var maxRetries: Int = 3
+    var retryDelay: Duration = 1.seconds
+    var exponentialBackoff: Boolean = true
+}
+
+class RetryFeatureImpl(
+    private val config: RetryFeatureConfig
+) {
+    suspend fun <T> withRetry(block: suspend () -> T): T {
+        var lastException: Throwable? = null
+        var delay = config.retryDelay
+        
+        repeat(config.maxRetries) { attempt ->
+            try {
+                return block()
+            } catch (e: Exception) {
+                lastException = e
+                if (attempt < config.maxRetries - 1) {
+                    delay(delay)
+                    if (config.exponentialBackoff) {
+                        delay *= 2
+                    }
+                }
+            }
+        }
+        
+        throw lastException!!
+    }
+}
+
+object RetryFeature : AIAgentGraphFeature<RetryFeatureConfig, RetryFeatureImpl> {
+    override val key = AIAgentStorageKey<RetryFeatureImpl>("retry")
+    
+    override fun createInitialConfig() = RetryFeatureConfig()
+    
+    override fun install(
+        config: RetryFeatureConfig,
+        pipeline: AIAgentGraphPipeline
+    ): RetryFeatureImpl {
+        return RetryFeatureImpl(config)
+    }
+}
+```
+
+### Tracing Feature
+
+Logs execution traces:
+
+```kotlin
+class TracingFeatureConfig : FeatureConfig {
+    var writer: TraceWriter = TraceFeatureMessageLogWriter()
+    var includeTimestamps: Boolean = true
+    var includeTokenCounts: Boolean = true
+}
+
+class TracingFeatureImpl(
+    private val config: TracingFeatureConfig,
+    private val pipeline: AIAgentGraphPipeline
+) {
+    private val traces = mutableListOf<TraceEvent>()
+    
+    fun addTrace(event: TraceEvent) {
+        traces.add(event)
+        config.writer.write(event)
+    }
+}
+
+object TracingFeature : AIAgentGraphFeature<TracingFeatureConfig, TracingFeatureImpl> {
+    override val key = AIAgentStorageKey<TracingFeatureImpl>("tracing")
+    
+    override fun createInitialConfig() = TracingFeatureConfig()
+    
+    override fun install(
+        config: TracingFeatureConfig,
+        pipeline: AIAgentGraphPipeline
+    ): TracingFeatureImpl {
+        val impl = TracingFeatureImpl(config, pipeline)
+        
+        pipeline.interceptAgentStarting(this) { context ->
+            impl.addTrace(TraceEvent.AgentStarted(
+                agentId = context.agent.id,
+                timestamp = if (config.includeTimestamps) 
+                    Clock.System.now() else null
+            ))
+        }
+        
+        pipeline.interceptAgentCompleted(this) { context ->
+            impl.addTrace(TraceEvent.AgentCompleted(
+                agentId = context.agentId,
+                result = context.result,
+                timestamp = if (config.includeTimestamps)
+                    Clock.System.now() else null
+            ))
+        }
+        
+        return impl
+    }
+}
+```
+
+### Cost Tracking Feature
+
+Tracks LLM usage costs:
+
+```kotlin
+class CostTrackingFeatureConfig : FeatureConfig {
+    var models: Map<String, CostPerToken> = emptyMap()
+    var alertThreshold: Double? = null
+}
+
+data class CostPerToken(
+    val inputCostPer1kTokens: Double,
+    val outputCostPer1kTokens: Double
+)
+
+class CostTrackingFeatureImpl(
+    private val config: CostTrackingFeatureConfig
+) {
+    private var totalCost: Double = 0.0
+    private val costsByModel = mutableMapOf<String, Double>()
+    
+    fun addUsage(model: String, inputTokens: Int, outputTokens: Int) {
+        val pricing = config.models[model] ?: return
+        
+        val cost = (inputTokens / 1000.0 * pricing.inputCostPer1kTokens) +
+                   (outputTokens / 1000.0 * pricing.outputCostPer1kTokens)
+        
+        totalCost += cost
+        costsByModel[model] = (costsByModel[model] ?: 0.0) + cost
+        
+        config.alertThreshold?.let { threshold ->
+            if (totalCost >= threshold) {
+                println("Warning: Cost threshold exceeded: $$totalCost")
+            }
+        }
+    }
+    
+    fun getTotalCost(): Double = totalCost
+    fun getCostsByModel(): Map<String, Double> = costsByModel.toMap()
+}
+
+object CostTrackingFeature : AIAgentGraphFeature<CostTrackingFeatureConfig, CostTrackingFeatureImpl> {
+    override val key = AIAgentStorageKey<CostTrackingFeatureImpl>("cost-tracking")
+    
+    override fun createInitialConfig() = CostTrackingFeatureConfig()
+    
+    override fun install(
+        config: CostTrackingFeatureConfig,
+        pipeline: AIAgentGraphPipeline
+    ): CostTrackingFeatureImpl {
+        val impl = CostTrackingFeatureImpl(config)
+        
+        pipeline.interceptLLMCallCompleted(this) { context ->
+            // Extract token counts from response
+            val usage = context.responses.firstOrNull()?.usage
+            usage?.let {
+                impl.addUsage(
+                    model = context.model.id,
+                    inputTokens = it.inputTokens,
+                    outputTokens = it.outputTokens
+                )
+            }
+        }
+        
+        return impl
+    }
+}
+```
+
+## Accessing Features
+
+Retrieve installed features from the pipeline:
+
+```kotlin
+class MyStrategy : AIAgentGraphStrategy<String, String> {
+    override val name = "my-strategy"
+    
+    override suspend fun execute(
+        context: AIAgentGraphContext,
+        input: String
+    ): String? {
+        // Access installed feature
+        val memory = context.pipeline.feature(
+            MemoryFeatureImpl::class,
+            MemoryFeature
+        )
+        
+        memory?.let {
+            val history = it.getMessages()
+            println("History: ${history.size} messages")
+        }
+        
+        return input
+    }
+}
+```
+
+## Built-in Features
+
+Koog provides several built-in features:
+
+### Tracing
+
+```kotlin
+install(TracingFeature) {
+    writer = TraceFeatureMessageFileWriter("trace.log")
+    includeTimestamps = true
+}
+```
+
+### Event Handling
+
+```kotlin
+install(EventHandlingFeature) {
+    onAgentStarted { event ->
+        println("Agent started: ${event.agentId}")
+    }
+    onToolCalled { event ->
+        println("Tool called: ${event.toolName}")
+    }
+}
+```
+
+### Snapshot/Rollback
+
+```kotlin
+install(SnapshotFeature) {
+    enableAutoSnapshot = true
+    snapshotInterval = 5.seconds
+}
+```
+
+## Feature Composition
+
+Combine features for complex behavior:
+
+```kotlin
+val agent = AIAgent(...) {
+    // Memory for conversation history
+    install(MemoryFeature) {
+        maxMessages = 50
+    }
+    
+    // Tracing for debugging
+    install(TracingFeature) {
+        writer = TraceFeatureMessageLogWriter()
+    }
+    
+    // Cost tracking for monitoring
+    install(CostTrackingFeature) {
+        models = mapOf(
+            "gpt-4" to CostPerToken(0.03, 0.06),
+            "claude-3-opus" to CostPerToken(0.015, 0.075)
+        )
+        alertThreshold = 1.0
+    }
+    
+    // Custom logging
+    install(LoggingFeature) {
+        logLevel = LogLevel.DEBUG
+        includeToolCalls = true
+    }
+}
+```
+
+## Best Practices
+
+<Note>
+  **Feature Design**
+  
+  - Use descriptive, unique keys for feature storage
+  - Keep feature implementations focused and single-purpose
+  - Provide sensible default configurations
+  - Document configuration options clearly
+  - Consider feature interactions and ordering
+  - Use the pipeline for all event interception
+</Note>
+
+<Warning>
+  **Common Pitfalls**
+  
+  - Don't modify pipeline state in configuration blocks
+  - Avoid heavy initialization in `createInitialConfig()`
+  - Be careful with feature dependencies
+  - Don't store mutable state in feature config
+  - Always clean up resources in feature implementations
+</Warning>
+
+## Testing Features
+
+```kotlin
+@Test
+fun testLoggingFeature() = runTest {
+    val agent = AIAgent(...) {
+        install(LoggingFeature) {
+            logLevel = LogLevel.DEBUG
+        }
+    }
+    
+    val result = agent.run("test input")
+    
+    // Access feature for verification
+    val logging = agent.pipeline.feature(
+        LoggingFeatureImpl::class,
+        LoggingFeature
+    )
+    
+    assertNotNull(logging)
+}
+```
+
+## Related Types
+
+- [AIAgent](/api/ai-agent) - Installs and uses features
+- [AIAgentPipeline](/api/ai-agent-pipeline) - Provides feature lifecycle hooks
+- [AIAgentStrategy](/api/ai-agent-strategy) - Can access features through context
+
+## Source Reference
+
+Defined in: `agents-core/src/commonMain/kotlin/ai/koog/agents/core/feature/AIAgentFeature.kt`

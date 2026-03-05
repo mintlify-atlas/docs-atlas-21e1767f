@@ -1,0 +1,509 @@
+---
+title: Testing Agents
+description: Test agents with mocked LLMs and tools using the agents-test framework
+---
+
+Koog provides comprehensive testing utilities in the `agents-test` module for mocking LLM responses, tool behavior, and validating graph structures.
+
+## Setup
+
+Add the testing dependency:
+
+```kotlin build.gradle.kts
+dependencies {
+    testImplementation("ai.koog:agents-test:1.0.0")
+}
+```
+
+## Mocking LLM Responses
+
+Create deterministic LLM responses for testing:
+
+```kotlin
+import ai.koog.agents.testing.tools.getMockExecutor
+
+val mockLLMApi = getMockExecutor(toolRegistry) {
+    // Mock text responses
+    mockLLMAnswer("Hello!") onRequestContains "Hello"
+    mockLLMAnswer("Goodbye!") onRequestEquals "Bye"
+    
+    // Default response
+    mockLLMAnswer("I don't understand.").asDefaultResponse
+    
+    // Mock tool calls
+    mockLLMToolCall(PositiveToneTool, ToneTool.Args("Great!")) onRequestContains "positive"
+}
+```
+
+### Response Matching
+
+Different ways to match requests:
+
+```kotlin
+// Exact match
+mockLLMAnswer("Response") onRequestEquals "Exact input text"
+
+// Partial match
+mockLLMAnswer("Response") onRequestContains "keyword"
+
+// Conditional match
+mockLLMAnswer("Response") onCondition { input ->
+    input.length > 10 && input.contains("specific")
+}
+
+// Default fallback
+mockLLMAnswer("Default response").asDefaultResponse
+```
+
+### Multiple Responses
+
+Chain different responses for sequential calls:
+
+```kotlin
+val mockLLMApi = getMockExecutor(toolRegistry) {
+    // First call
+    mockLLMToolCall(SearchTool, SearchTool.Args("query")) onRequestEquals "Search for X"
+    
+    // Second call (after tool result)
+    mockLLMAnswer("Here are the results...") onRequestContains "SearchResult"
+    
+    // Third call
+    mockLLMAnswer("Done") onRequestContains "summarize"
+}
+```
+
+## Mocking Tool Behavior
+
+Control how tools behave in tests:
+
+### Simple Returns
+
+```kotlin
+val mockLLMApi = getMockExecutor(toolRegistry) {
+    // Always return the same value
+    mockTool(PositiveToneTool) alwaysReturns "The text has a positive tone."
+    
+    // Return with custom logic
+    mockTool(NegativeToneTool) alwaysTells {
+        println("Negative tone tool called")
+        "The text has a negative tone."
+    }
+}
+```
+
+### Conditional Returns
+
+```kotlin
+val mockLLMApi = getMockExecutor(toolRegistry) {
+    // Match exact arguments
+    mockTool(SearchTool) returns SearchResult("Found") onArguments 
+        SearchTool.Args(query = "important")
+    
+    // Match with condition
+    mockTool(SearchTool) returns SearchResult("Found") onArgumentsMatching { args ->
+        args.query.contains("important")
+    }
+    
+    // Default for other cases
+    mockTool(SearchTool) alwaysReturns SearchResult("Not found")
+}
+```
+
+### Stateful Mocks
+
+Track tool calls and side effects:
+
+```kotlin
+val toolCalls = mutableListOf<String>()
+
+val mockLLMApi = getMockExecutor(toolRegistry) {
+    mockTool(CreateTool) alwaysTells {
+        toolCalls += "Create called"
+        "Created"
+    }
+    
+    mockTool(DeleteTool) alwaysTells {
+        toolCalls += "Delete called"
+        "Deleted"
+    }
+}
+
+// In test
+runTest {
+    agent.run("Create then delete")
+    assertEquals(listOf("Create called", "Delete called"), toolCalls)
+}
+```
+
+## Complete Test Example
+
+Full test with mocked LLM and tools:
+
+```kotlin ToneAgentTest.kt
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.example.tone.ToneTools.*
+import ai.koog.agents.features.eventHandler.feature.EventHandler
+import ai.koog.agents.testing.feature.withTesting
+import ai.koog.agents.testing.tools.getMockExecutor
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlinx.coroutines.test.runTest
+
+class ToneAgentTest {
+    @Test
+    fun testToneAgent() = runTest {
+        val toolCalls = mutableListOf<String>()
+        var result: Any? = null
+        
+        val toolRegistry = ToolRegistry {
+            tool(SayToUser)
+            with(ToneTools) { tools() }
+        }
+        
+        val positiveText = "I love this product!"
+        val negativeText = "Awful service, hate the app."
+        val neutralText = "I don't know how to answer this."
+        
+        val positiveResponse = "The text has a positive tone."
+        val negativeResponse = "The text has a negative tone."
+        val neutralResponse = "The text has a neutral tone."
+        
+        val mockLLMApi = getMockExecutor(toolRegistry) {
+            // LLM decides which tool to call
+            mockLLMToolCall(NeutralToneTool, ToneTool.Args(neutralText)) 
+                onRequestEquals neutralText
+            mockLLMToolCall(PositiveToneTool, ToneTool.Args(positiveText)) 
+                onRequestEquals positiveText
+            mockLLMToolCall(NegativeToneTool, ToneTool.Args(negativeText)) 
+                onRequestEquals negativeText
+            
+            // LLM responds with tool results
+            mockLLMAnswer(positiveResponse) onRequestContains positiveResponse
+            mockLLMAnswer(negativeResponse) onRequestContains negativeResponse
+            mockLLMAnswer(neutralResponse) onRequestContains neutralResponse
+            
+            mockLLMAnswer(neutralText).asDefaultResponse
+            
+            // Mock tool implementations
+            mockTool(PositiveToneTool) alwaysTells {
+                toolCalls += "Positive tone tool called"
+                positiveResponse
+            }
+            
+            mockTool(NegativeToneTool) alwaysTells {
+                toolCalls += "Negative tone tool called"
+                negativeResponse
+            }
+            
+            mockTool(NeutralToneTool) alwaysTells {
+                toolCalls += "Neutral tone tool called"
+                neutralResponse
+            }
+        }
+        
+        val agent = AIAgent(
+            promptExecutor = mockLLMApi,
+            strategy = toneStrategy("tone_analysis"),
+            agentConfig = AIAgentConfig(
+                prompt = prompt("test-agent") {
+                    system("You are a tone analysis agent.")
+                },
+                model = mockk<LLModel>(relaxed = true),
+                maxAgentIterations = 10
+            ),
+            toolRegistry = toolRegistry,
+        ) {
+            withTesting()
+            install(EventHandler) {
+                onToolCallStarting { eventContext ->
+                    toolCalls.add(eventContext.toolName)
+                }
+                
+                onAgentCompleted { eventContext ->
+                    result = eventContext.result
+                }
+            }
+        }
+        
+        // Test positive text
+        agent.run(positiveText)
+        assertEquals(positiveResponse, result)
+        assertEquals(1, toolCalls.size)
+        
+        // Test negative text
+        agent.run(negativeText)
+        assertEquals(negativeResponse, result)
+        assertEquals(2, toolCalls.size)
+        
+        // Test neutral text
+        agent.run(neutralText)
+        assertEquals(neutralResponse, result)
+        assertEquals(3, toolCalls.size)
+    }
+}
+```
+
+## Testing Graph Structure
+
+Validate graph topology and flow:
+
+```kotlin
+import ai.koog.agents.testing.feature.withTesting
+
+val agent = AIAgent(
+    promptExecutor = mockExecutor,
+    strategy = myStrategy(),
+    agentConfig = config,
+    toolRegistry = toolRegistry
+) {
+    withTesting()
+    
+    testGraph("verify_graph_structure") {
+        // Assert subgraph exists
+        val firstSubgraph = assertSubgraphByName<String, String>("first")
+        val secondSubgraph = assertSubgraphByName<String, String>("second")
+        
+        // Assert edges between subgraphs
+        assertEdges {
+            startNode() alwaysGoesTo firstSubgraph
+            firstSubgraph alwaysGoesTo secondSubgraph
+        }
+        
+        // Verify subgraph internals
+        verifySubgraph(firstSubgraph) {
+            val askLLM = assertNodeByName<String, Message.Response>("callLLM")
+            
+            assertNodes {
+                askLLM withInput "Hello" outputs Message.Assistant("Hello!")
+            }
+        }
+    }
+}
+```
+
+### Testing Conditional Edges
+
+```kotlin
+testGraph("conditional_routing") {
+    val classifyNode = assertNodeByName<String, Classification>("classify")
+    val handlePositive = assertNodeByName<Classification, String>("positive")
+    val handleNegative = assertNodeByName<Classification, String>("negative")
+    
+    assertEdges {
+        classifyNode goesTo handlePositive onCondition { it.isPositive }
+        classifyNode goesTo handleNegative onCondition { !it.isPositive }
+    }
+}
+```
+
+## Testing Event Handling
+
+Verify events are fired correctly:
+
+```kotlin
+@Test
+fun testEventHandling() = runTest {
+    val events = mutableListOf<String>()
+    
+    val agent = AIAgent(
+        promptExecutor = mockExecutor,
+        strategy = strategy(),
+        toolRegistry = toolRegistry
+    ) {
+        handleEvents {
+            onToolCallStarting { events += "tool_start:${it.toolName}" }
+            onToolCallCompleted { events += "tool_complete:${it.toolName}" }
+            onAgentCompleted { events += "agent_complete" }
+        }
+    }
+    
+    agent.run("Test input")
+    
+    assertTrue(events.contains("tool_start:MyTool"))
+    assertTrue(events.contains("tool_complete:MyTool"))
+    assertTrue(events.contains("agent_complete"))
+}
+```
+
+## Testing Streaming
+
+Test streaming behavior:
+
+```kotlin
+@Test
+fun testStreaming() = runTest {
+    val receivedFrames = mutableListOf<StreamFrame>()
+    
+    val mockExecutor = getMockExecutor(toolRegistry) {
+        mockLLMAnswer("Streaming response") onRequestContains "stream"
+    }
+    
+    val agent = AIAgent(
+        promptExecutor = mockExecutor,
+        strategy = streamingStrategy(),
+        toolRegistry = toolRegistry
+    ) {
+        handleEvents {
+            onLLMStreamingFrameReceived { context ->
+                receivedFrames.add(context.streamFrame)
+            }
+        }
+    }
+    
+    agent.run("Stream this")
+    
+    assertTrue(receivedFrames.any { it is StreamFrame.TextDelta })
+}
+```
+
+## Testing Multi-Agent Systems
+
+Test A2A communication:
+
+```kotlin
+@Test
+fun testA2ACommunication() = runTest {
+    // Mock the remote agent
+    val mockRemoteAgent = getMockExecutor(ToolRegistry.EMPTY) {
+        mockLLMAnswer("Remote agent response") onRequestContains "delegate"
+    }
+    
+    // Test local agent that delegates
+    val localAgent = AIAgent(
+        promptExecutor = mockExecutor,
+        toolRegistry = ToolRegistry {
+            tool(DelegateToRemoteAgent)
+        }
+    )
+    
+    val result = localAgent.run("Delegate this task")
+    
+    assertTrue(result.contains("Remote agent response"))
+}
+```
+
+## Best Practices
+
+### Isolate Tests
+
+Each test should have its own agent instance:
+
+```kotlin
+@Test
+fun testScenario1() = runTest {
+    val agent = createTestAgent()
+    // Test...
+}
+
+@Test
+fun testScenario2() = runTest {
+    val agent = createTestAgent()
+    // Test...
+}
+
+private fun createTestAgent() = AIAgent(
+    promptExecutor = getMockExecutor(toolRegistry) { /* ... */ },
+    strategy = myStrategy(),
+    toolRegistry = toolRegistry
+)
+```
+
+### Test Edge Cases
+
+Test error conditions and edge cases:
+
+```kotlin
+@Test
+fun testToolFailure() = runTest {
+    val mockExecutor = getMockExecutor(toolRegistry) {
+        mockTool(FailingTool) alwaysTells {
+            throw RuntimeException("Tool failed")
+        }
+    }
+    
+    val agent = AIAgent(
+        promptExecutor = mockExecutor,
+        toolRegistry = toolRegistry
+    ) {
+        handleEvents {
+            onToolCallFailed { context ->
+                assertTrue(context.error.message?.contains("Tool failed") == true)
+            }
+        }
+    }
+    
+    agent.run("Trigger failure")
+}
+```
+
+### Use Descriptive Names
+
+Make test intent clear:
+
+```kotlin
+@Test
+fun `should execute positive tone tool when input is positive`() = runTest {
+    // Test...
+}
+
+@Test
+fun `should compress history when message count exceeds 100`() = runTest {
+    // Test...
+}
+```
+
+## Running Tests
+
+```bash
+# Run all tests
+./gradlew test
+
+# Run specific test class
+./gradlew test --tests "ToneAgentTest"
+
+# Run specific test method
+./gradlew test --tests "ToneAgentTest.testToneAgent"
+
+# Run JVM tests only
+./gradlew jvmTest
+
+# Run JS tests only
+./gradlew jsTest
+```
+
+## Next Steps
+
+- [Creating Your First Agent](/guides/creating-your-first-agent) — Build agents to test
+- [Graph Workflows](/guides/graph-workflows) — Test graph structures
+- [Multi-Agent Systems](/guides/multi-agent-systems) — Test A2A communication
+
+## Testing Utilities Reference
+
+### getMockExecutor
+
+Creates a mock prompt executor:
+
+```kotlin
+val mockExecutor = getMockExecutor(
+    toolRegistry = toolRegistry,
+    clock = Clock.System,
+    tokenizer = myTokenizer,
+    handleLastAssistantMessage = false
+) {
+    // Configure mocks
+}
+```
+
+### withTesting
+
+Enables testing features:
+
+```kotlin
+AIAgent(...) {
+    withTesting()
+    testGraph("name") { /* ... */ }
+}
+```
+
+For comprehensive examples, see the [simple-examples test suite](https://github.com/koogio/koog/tree/main/examples/simple-examples/src/test).

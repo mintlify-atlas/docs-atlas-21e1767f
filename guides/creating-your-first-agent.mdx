@@ -1,0 +1,224 @@
+---
+title: Creating Your First Agent
+description: Step-by-step tutorial to build your first AI agent from scratch
+---
+
+This tutorial walks you through creating a complete AI agent from scratch using the Koog framework.
+
+## What You'll Build
+
+A simple coding agent that can read, edit, and list files in a project directory. By the end of this guide, you'll understand:
+
+- Agent initialization and configuration
+- Tool registration
+- Prompt executor setup
+- Event handling
+- Running agents
+
+<Steps>
+
+### Install Dependencies
+
+Add Koog to your project:
+
+```kotlin build.gradle.kts
+dependencies {
+    implementation("ai.koog:koog-agents:1.0.0")
+    implementation("ai.koog:prompt-executor-openai:1.0.0")
+}
+```
+
+### Set Up Your API Key
+
+Koog requires an LLM provider API key. Set it as an environment variable:
+
+```bash
+export OPENAI_API_KEY=your_api_key_here
+```
+
+### Create the Prompt Executor
+
+The prompt executor handles communication with the LLM:
+
+```kotlin
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+
+val executor = simpleOpenAIExecutor(System.getenv("OPENAI_API_KEY"))
+```
+
+### Register Tools
+
+Tools are capabilities your agent can use. Register built-in file tools:
+
+```kotlin
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.ext.tool.file.*
+import ai.koog.rag.base.files.JVMFileSystemProvider
+
+val toolRegistry = ToolRegistry {
+    tool(ListDirectoryTool(JVMFileSystemProvider.ReadOnly))
+    tool(ReadFileTool(JVMFileSystemProvider.ReadOnly))
+    tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+}
+```
+
+### Create the Agent
+
+Combine the executor, tools, and configuration:
+
+```kotlin
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.agent.singleRunStrategy
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+val agent = AIAgent(
+    promptExecutor = executor,
+    llmModel = OpenAIModels.Chat.GPT4oMini,
+    toolRegistry = toolRegistry,
+    systemPrompt = """
+        You are a highly skilled programmer tasked with updating 
+        the provided codebase according to the given task.
+        Your goal is to deliver production-ready code changes that 
+        integrate seamlessly with the existing codebase.
+    """.trimIndent(),
+    strategy = singleRunStrategy(),
+    maxIterations = 100
+)
+```
+
+### Add Event Handling (Optional)
+
+Monitor tool calls and other events:
+
+```kotlin
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+
+val agent = AIAgent(
+    promptExecutor = executor,
+    llmModel = OpenAIModels.Chat.GPT4oMini,
+    toolRegistry = toolRegistry,
+    systemPrompt = "...",
+    strategy = singleRunStrategy(),
+    maxIterations = 100
+) {
+    handleEvents {
+        onToolCallStarting { ctx ->
+            println("Tool '${ctx.toolName}' called with args: ${ctx.toolArgs}")
+        }
+    }
+}
+```
+
+### Run the Agent
+
+Execute your agent with a task:
+
+```kotlin
+suspend fun main(args: Array<String>) {
+    if (args.size < 2) {
+        println("Usage: <project_path> <task>")
+        return
+    }
+
+    val (path, task) = args
+    val input = "Project absolute path: $path\n\n## Task\n$task"
+    
+    try {
+        val result = agent.run(input)
+        println(result)
+    } finally {
+        executor.close()
+    }
+}
+```
+
+</Steps>
+
+## Complete Example
+
+Here's the full working code:
+
+```kotlin Main.kt
+package ai.koog.agents.examples.codeagent
+
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.agent.singleRunStrategy
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.ext.tool.file.*
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.rag.base.files.JVMFileSystemProvider
+
+val executor = simpleOpenAIExecutor(System.getenv("OPENAI_API_KEY"))
+
+val agent = AIAgent(
+    promptExecutor = executor,
+    llmModel = OpenAIModels.Chat.GPT4oMini,
+    toolRegistry = ToolRegistry {
+        tool(ListDirectoryTool(JVMFileSystemProvider.ReadOnly))
+        tool(ReadFileTool(JVMFileSystemProvider.ReadOnly))
+        tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+    },
+    systemPrompt = """
+        You are a highly skilled programmer tasked with updating 
+        the provided codebase according to the given task.
+        Your goal is to deliver production-ready code changes that 
+        integrate seamlessly with the existing codebase.
+    """.trimIndent(),
+    strategy = singleRunStrategy(),
+    maxIterations = 100
+) {
+    handleEvents {
+        onToolCallStarting { ctx ->
+            println("Tool '${ctx.toolName}' called with args: ${ctx.toolArgs}")
+        }
+    }
+}
+
+suspend fun main(args: Array<String>) {
+    if (args.size < 2) {
+        println("Error: Please provide the project path and task")
+        println("Usage: <absolute_path> <task>")
+        return
+    }
+
+    val (path, task) = args
+    val input = "Project absolute path: $path\n\n## Task\n$task"
+    
+    try {
+        val result = agent.run(input)
+        println(result)
+    } finally {
+        executor.close()
+    }
+}
+```
+
+## What's Next?
+
+- [Adding Custom Tools](/guides/adding-tools) — Learn to create custom tools for your agents
+- [Graph Workflows](/guides/graph-workflows) — Build complex multi-step workflows
+- [Testing Agents](/guides/testing-agents) — Write tests for your agents
+
+## Key Concepts
+
+### AIAgent
+
+The main orchestrator that executes strategies, manages tools, and handles LLM communication.
+
+### ToolRegistry
+
+Centralized, type-safe tool management using a builder pattern. Tools are registered with `tool()` and registries can be merged with the `+` operator.
+
+### PromptExecutor
+
+Handles communication with LLM providers (OpenAI, Anthropic, Google, etc.).
+
+### Strategy
+
+Defines the agent's execution workflow. `singleRunStrategy()` runs once and finishes, while graph strategies allow complex flows.
+
+### System Prompt
+
+Instructions that guide the agent's behavior. Make it clear, specific, and task-focused.

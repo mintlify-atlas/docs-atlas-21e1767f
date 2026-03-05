@@ -1,0 +1,397 @@
+---
+title: Anthropic Provider
+description: Use Anthropic's Claude models with extended thinking and long context capabilities
+---
+
+Anthropic provides the Claude family of models, known for strong reasoning, long context windows (200K tokens), and extended thinking capabilities.
+
+## Installation
+
+The Anthropic client is included in the core Koog library. No additional dependencies required.
+
+## Quick Start
+
+```kotlin
+import ai.koog.prompt.executor.clients.anthropic.*
+import ai.koog.agents.core.*
+
+val executor = simpleAnthropicExecutor(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    model = AnthropicModels.Sonnet_4_5
+)
+
+val agent = AIAgent(
+    executor = executor,
+    tools = toolRegistry {
+        // Your tools here
+    }
+) {
+    // Define your agent strategy
+}
+
+val result = agent.execute("Analyze this document...")
+```
+
+## Authentication
+
+### API Key Setup
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### Programmatic Configuration
+
+```kotlin
+val client = AnthropicLLMClient(
+    apiKey = "sk-ant-...",
+    settings = AnthropicClientSettings(
+        baseUrl = "https://api.anthropic.com",
+        apiVersion = "2023-06-01",
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 120_000
+        )
+    )
+)
+```
+
+## Available Models
+
+### Claude Sonnet 4.5 (Recommended)
+
+Best model for complex agents and coding tasks.
+
+```kotlin
+AnthropicModels.Sonnet_4_5       // 200K context, highest intelligence
+```
+
+**Capabilities:**
+- Extended thinking with signatures
+- Function calling
+- Vision (images and PDFs)
+- Document processing
+- 200K token context window
+- 64K token output
+
+### Claude Haiku 4.5
+
+Fastest model with near-frontier intelligence.
+
+```kotlin
+AnthropicModels.Haiku_4_5        // 200K context, blazing speed
+```
+
+**Use cases:**
+- High-throughput applications
+- Real-time interactions
+- Cost-sensitive deployments
+- Quick analysis tasks
+
+### Claude Opus Series
+
+Most capable models for specialized complex tasks.
+
+```kotlin
+AnthropicModels.Opus_4_5         // Premium model, best for coding/agents
+AnthropicModels.Opus_4_6         // Frontier model with 1M output tokens
+AnthropicModels.Opus_4_1         // Specialized complex tasks
+```
+
+**Use cases:**
+- Software engineering
+- Agentic tasks
+- Long-context reasoning
+- Financial analysis
+- Multi-step research workflows
+
+### Legacy Models
+
+```kotlin
+AnthropicModels.Sonnet_4         // Previous generation
+AnthropicModels.Opus_4           // Previous flagship
+AnthropicModels.Haiku_3          // Deprecated, use Opus_4_6 instead
+```
+
+## Code Examples
+
+### Basic Chat Completion
+
+```kotlin
+val executor = simpleAnthropicExecutor(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    model = AnthropicModels.Sonnet_4_5
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        system("You are a helpful assistant.")
+        user("Explain quantum computing in simple terms.")
+    }
+)
+
+println(result.first().content)
+```
+
+### Function Calling with Tools
+
+```kotlin
+data class SearchArgs(val query: String)
+
+val searchTool = tool<SearchArgs, String>(
+    name = "search",
+    description = "Search the web for information"
+) { args ->
+    "Results for: ${args.query}"
+}
+
+val agent = AIAgent(
+    executor = simpleAnthropicExecutor(
+        apiKey = System.getenv("ANTHROPIC_API_KEY"),
+        model = AnthropicModels.Sonnet_4_5
+    ),
+    tools = toolRegistry { tool(searchTool) }
+) {
+    defineGraph<String, String>("search-agent") {
+        val response = callLLM()
+        finish(response)
+    }
+}
+
+val result = agent.execute("Find information about renewable energy")
+```
+
+### Vision - Image Analysis
+
+```kotlin
+val executor = simpleAnthropicExecutor(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    model = AnthropicModels.Sonnet_4_5
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user {
+            text("What's in this image?")
+            image(
+                url = "https://example.com/image.jpg"
+                // or: bytes = imageBytes
+            )
+        }
+    }
+)
+```
+
+### Document Processing
+
+```kotlin
+val executor = simpleAnthropicExecutor(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    model = AnthropicModels.Sonnet_4_5
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user {
+            text("Summarize this PDF")
+            file(
+                bytes = pdfBytes,
+                mimeType = "application/pdf",
+                fileName = "document.pdf"
+            )
+        }
+    }
+)
+```
+
+### Extended Thinking
+
+Claude models support extended thinking for complex reasoning:
+
+```kotlin
+val executor = simpleAnthropicExecutor(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    model = AnthropicModels.Opus_4_6,
+    params = AnthropicParams(
+        thinking = AnthropicParams.Thinking(
+            type = "adaptive",
+            effort = "high" // low, medium, high, xhigh
+        )
+    )
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user("Solve this complex math problem: ...")
+    }
+)
+
+// Access reasoning
+result.forEach { message ->
+    when (message) {
+        is Message.Reasoning -> println("Reasoning: ${message.content}")
+        is Message.Assistant -> println("Answer: ${message.content}")
+    }
+}
+```
+
+### Streaming Responses
+
+```kotlin
+val executor = simpleAnthropicExecutor(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    model = AnthropicModels.Sonnet_4_5
+)
+
+executor.executeStreaming(
+    prompt = prompt { user("Write a detailed analysis of...") }
+).collect { frame ->
+    when (frame) {
+        is StreamFrame.TextDelta -> print(frame.text)
+        is StreamFrame.ReasoningDelta -> print("[Thinking: ${frame.text}]")
+        is StreamFrame.End -> println("\nComplete")
+        else -> {}
+    }
+}
+```
+
+### Long Context Processing
+
+```kotlin
+val executor = simpleAnthropicExecutor(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    model = AnthropicModels.Sonnet_4_5 // 200K context
+)
+
+val longDocument = File("large_document.txt").readText() // Can be very large
+
+val result = executor.execute(
+    prompt = prompt {
+        system("You are analyzing a long document.")
+        user("Document content: $longDocument\n\nQuestion: What are the main themes?")
+    }
+)
+```
+
+## Advanced Configuration
+
+### Custom Parameters
+
+```kotlin
+val executor = simpleAnthropicExecutor(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    model = AnthropicModels.Sonnet_4_5,
+    params = AnthropicParams(
+        temperature = 0.7,
+        maxTokens = 4096,
+        topP = 0.9,
+        topK = 40,
+        stopSequences = listOf("\n\nHuman:"),
+        thinking = AnthropicParams.Thinking(
+            type = "adaptive",
+            effort = "medium"
+        )
+    )
+)
+```
+
+### Model Version Mapping
+
+Claude uses version-specific model IDs. Koog handles this automatically:
+
+```kotlin
+val settings = AnthropicClientSettings(
+    modelVersionsMap = mapOf(
+        AnthropicModels.Sonnet_4_5 to "claude-sonnet-4-5-20250929",
+        AnthropicModels.Opus_4_6 to "claude-opus-4-6"
+        // Custom mappings
+    )
+)
+```
+
+### Tool Choice Control
+
+```kotlin
+val executor = simpleAnthropicExecutor(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    model = AnthropicModels.Sonnet_4_5,
+    params = AnthropicParams(
+        toolChoice = LLMParams.ToolChoice.Required // Auto, None, Required, Named
+    )
+)
+```
+
+## Model Capabilities
+
+| Model | Context | Output | Vision | Docs | Tools | Thinking |
+|-------|---------|--------|--------|------|-------|----------|
+| Sonnet 4.5 | 200K | 64K | ✅ | ✅ | ✅ | ✅ |
+| Haiku 4.5 | 200K | 64K | ✅ | ✅ | ✅ | ✅ |
+| Opus 4.6 | 200K | 1M | ✅ | ✅ | ✅ | ✅ |
+| Opus 4.5 | 200K | 64K | ✅ | ✅ | ✅ | ✅ |
+| Sonnet 4 | 200K | 64K | ✅ | ✅ | ✅ | ❌ |
+
+## Pricing
+
+Pricing varies by model. See [Anthropic Pricing](https://www.anthropic.com/pricing) for current rates.
+
+**Example costs (per 1M tokens):**
+- Haiku 4.5: $1 (input) / $5 (output)
+- Sonnet 4.5: $3 (input) / $15 (output)
+- Opus 4.5: $5 (input) / $25 (output)
+- Opus 4.6: $5 (input) / $25 (output)
+
+## Best Practices
+
+1. **Use Sonnet 4.5** for most tasks - best balance of capability and cost
+2. **Use Haiku 4.5** for high-throughput scenarios
+3. **Use Opus 4.6** for maximum output length needs
+4. **Leverage extended thinking** for complex reasoning tasks
+5. **Utilize long context** for document analysis
+6. **Enable streaming** for better UX with long responses
+
+## Limitations
+
+- **No embeddings**: Use OpenAI or Google for embeddings
+- **No moderation API**: Implement custom content filtering
+- **No structured outputs**: Parse responses manually or use tool calling
+- **No audio**: Text and vision only
+
+## Troubleshooting
+
+### Rate Limits
+
+```kotlin
+val client = AnthropicLLMClient(
+    apiKey = System.getenv("ANTHROPIC_API_KEY"),
+    settings = AnthropicClientSettings(
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 180_000 // Longer timeout for complex tasks
+        )
+    )
+)
+```
+
+### Error Handling
+
+```kotlin
+try {
+    val result = executor.execute(prompt { user("Hello") })
+} catch (e: LLMClientException) {
+    when {
+        e.message?.contains("overloaded") == true -> {
+            // Retry with exponential backoff
+        }
+        e.message?.contains("invalid_request_error") == true -> {
+            // Check request format
+        }
+        else -> throw e
+    }
+}
+```
+
+## Resources
+
+- [Anthropic API Documentation](https://docs.anthropic.com)
+- [Model Pricing](https://www.anthropic.com/pricing)
+- [Claude Model Card](https://www.anthropic.com/claude)
+- [API Reference](/api-reference/llm-providers/anthropic)

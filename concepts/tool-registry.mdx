@@ -1,0 +1,527 @@
+---
+title: "Tool Registry"
+description: "Managing tool collections with ToolRegistry's type-safe builder pattern"
+---
+
+## Overview
+
+The `ToolRegistry` is a centralized repository for managing tools available to an AI agent. It provides type-safe access to tools, ensures unique tool names, and supports composing multiple registries through merging.
+
+## Creating a Tool Registry
+
+### Basic Creation
+
+Use the builder DSL to create a registry:
+
+```kotlin
+val toolRegistry = ToolRegistry {
+    tool(SearchTool())
+    tool(CalculatorTool())
+    tool(WeatherTool())
+}
+```
+
+### From Functions
+
+Register function-based tools:
+
+```kotlin
+@Tool
+fun addNumbers(a: Int, b: Int): Int = a + b
+
+@Tool
+fun multiplyNumbers(a: Int, b: Int): Int = a * b
+
+val toolRegistry = ToolRegistry {
+    tool(::addNumbers)
+    tool(::multiplyNumbers)
+}
+```
+
+### From ToolSets
+
+Register all tools from a ToolSet:
+
+```kotlin
+class MathTools : ToolSet {
+    @Tool
+    fun add(a: Int, b: Int) = a + b
+    
+    @Tool
+    fun subtract(a: Int, b: Int) = a - b
+}
+
+val mathTools = MathTools()
+
+val toolRegistry = ToolRegistry {
+    tools(mathTools)  // Registers all @Tool annotated methods
+}
+```
+
+### Empty Registry
+
+For agents that don't need tools:
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = ToolRegistry.EMPTY
+)
+```
+
+## Accessing Tools
+
+### By Name
+
+Retrieve a tool by its name:
+
+```kotlin
+val tool = toolRegistry.getTool("search")
+println("Tool name: ${tool.name}")
+
+// Safe version
+val toolOrNull = toolRegistry.getToolOrNull("nonexistent")
+if (toolOrNull != null) {
+    // Use tool
+}
+```
+
+### By Type
+
+Retrieve a tool by its class:
+
+```kotlin
+val searchTool = toolRegistry.getTool<SearchTool>()
+val args = SearchTool.Args(query = "kotlin")
+val result = searchTool.execute(args)
+```
+
+<Note>
+Type-based retrieval uses Kotlin's reified generics for compile-time type safety.
+</Note>
+
+### List All Tools
+
+Access all registered tools:
+
+```kotlin
+val allTools = toolRegistry.tools
+println("Registered tools:")
+allTools.forEach { tool ->
+    println("- ${tool.name}: ${tool.descriptor.description}")
+}
+```
+
+## Merging Registries
+
+Combine multiple registries using the `+` operator:
+
+```kotlin
+val mathTools = ToolRegistry {
+    tool(AddTool())
+    tool(SubtractTool())
+}
+
+val stringTools = ToolRegistry {
+    tool(UppercaseTool())
+    tool(LowercaseTool())
+}
+
+val allTools = mathTools + stringTools
+
+// Use merged registry
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = allTools
+)
+```
+
+### Merging with MCP Registries
+
+Integrate Model Context Protocol tools:
+
+```kotlin
+val mcpRegistry = mcpClient.getToolRegistry()
+
+val combinedRegistry = ToolRegistry {
+    tool(MyCustomTool())
+    tools(myToolSet)
+} + mcpRegistry
+
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = combinedRegistry
+)
+```
+
+<Warning>
+**Name Conflicts**: When merging registries, tools with duplicate names are deduplicated. The first occurrence is kept:
+
+```kotlin
+val registry1 = ToolRegistry { tool(SearchTool()) }  // Name: "search"
+val registry2 = ToolRegistry { tool(SearchTool()) }  // Name: "search"
+
+val merged = registry1 + registry2
+// Only one "search" tool in the merged registry
+```
+</Warning>
+
+## Dynamic Registration
+
+Add tools after registry creation:
+
+```kotlin
+val toolRegistry = ToolRegistry.EMPTY
+
+// Add single tool
+toolRegistry.add(SearchTool())
+
+// Add multiple tools
+toolRegistry.addAll(
+    CalculatorTool(),
+    WeatherTool(),
+    TranslationTool()
+)
+```
+
+<Note>
+**Mutability**: While `ToolRegistry` supports dynamic addition, it's generally better to create complete registries upfront for better testability and predictability.
+</Note>
+
+## Builder Pattern
+
+For Java interop or explicit building:
+
+```kotlin
+val toolRegistry = ToolRegistry.builder()
+    .tool(SearchTool())
+    .tool(CalculatorTool())
+    .tools(listOf(WeatherTool(), TranslationTool()))
+    .build()
+```
+
+## Tool Registration Patterns
+
+### Conditional Registration
+
+Register tools based on configuration:
+
+```kotlin
+fun createToolRegistry(config: AppConfig): ToolRegistry {
+    return ToolRegistry {
+        // Always include core tools
+        tool(SearchTool())
+        tool(CalculatorTool())
+        
+        // Conditional tools
+        if (config.enableWeather) {
+            tool(WeatherTool(config.weatherApiKey))
+        }
+        
+        if (config.enableTranslation) {
+            tool(TranslationTool(config.translationApiKey))
+        }
+        
+        if (config.enableDatabase) {
+            tools(DatabaseTools(config.dbConnection))
+        }
+    }
+}
+```
+
+### Environment-Based Registration
+
+Register different tools per environment:
+
+```kotlin
+fun createToolRegistry(environment: Environment): ToolRegistry {
+    return when (environment) {
+        Environment.PRODUCTION -> ToolRegistry {
+            tool(RealWeatherTool())
+            tool(RealDatabaseTool())
+        }
+        
+        Environment.DEVELOPMENT -> ToolRegistry {
+            tool(MockWeatherTool())
+            tool(MockDatabaseTool())
+        }
+        
+        Environment.TEST -> ToolRegistry {
+            tool(FakeWeatherTool())
+            tool(InMemoryDatabaseTool())
+        }
+    }
+}
+```
+
+### Feature-Based Registration
+
+Organize tools by feature:
+
+```kotlin
+fun createFeatureRegistry(features: Set<Feature>): ToolRegistry {
+    var registry = ToolRegistry.EMPTY
+    
+    features.forEach { feature ->
+        registry = registry + when (feature) {
+            Feature.WEATHER -> createWeatherTools()
+            Feature.MAPS -> createMapsTools()
+            Feature.EMAIL -> createEmailTools()
+            Feature.CALENDAR -> createCalendarTools()
+        }
+    }
+    
+    return registry
+}
+
+fun createWeatherTools() = ToolRegistry {
+    tools(WeatherTools(weatherApiClient))
+}
+
+fun createMapsTools() = ToolRegistry {
+    tools(MapsTools(mapsApiClient))
+}
+```
+
+## Trip Planning Example
+
+From the real Koog codebase:
+
+```kotlin
+fun createPlannerAgent(
+    promptExecutor: PromptExecutor,
+    openMeteoClient: OpenMeteoClient,
+    googleMapsMcpRegistry: ToolRegistry,
+    showMessage: suspend (String) -> String,
+): AIAgent<UserInput, TripPlan> {
+    val weatherTools = WeatherTools(openMeteoClient)
+    val userTools = UserTools(showMessage)
+    
+    // Combine custom tools with MCP tools
+    val toolRegistry = ToolRegistry {
+        tool(::addDate)           // Function-based tool
+        tools(weatherTools)       // ToolSet
+        tools(userTools)          // Another ToolSet
+    } + googleMapsMcpRegistry     // MCP registry
+    
+    return AIAgent(
+        promptExecutor = promptExecutor,
+        llmModel = OpenAIModels.Chat.GPT4o,
+        strategy = plannerStrategy,
+        toolRegistry = toolRegistry
+    )
+}
+```
+
+## Validation
+
+The registry enforces tool uniqueness:
+
+```kotlin
+val toolRegistry = ToolRegistry {
+    tool(SearchTool())  // Name: "search"
+    tool(SearchTool())  // ❌ Error: Tool "search" is already defined
+}
+```
+
+To allow duplicate class instances with unique names:
+
+```kotlin
+class ConfigurableTool(name: String) : Tool<Args, Result>(
+    argsSerializer = Args.serializer(),
+    resultSerializer = Result.serializer(),
+    name = name,  // Unique name
+    description = "Configurable tool"
+) {
+    override suspend fun execute(args: Args): Result {
+        // Implementation
+    }
+}
+
+val toolRegistry = ToolRegistry {
+    tool(ConfigurableTool("tool1"))
+    tool(ConfigurableTool("tool2"))  // ✅ Different names
+}
+```
+
+## Inspecting Registries
+
+### Tool Count
+
+```kotlin
+val count = toolRegistry.tools.size
+println("Registry contains $count tools")
+```
+
+### Tool Names
+
+```kotlin
+val toolNames = toolRegistry.tools.map { it.name }
+println("Available tools: ${toolNames.joinToString(", ")}")
+```
+
+### Tool Descriptors
+
+```kotlin
+toolRegistry.tools.forEach { tool ->
+    println("Tool: ${tool.name}")
+    println("Description: ${tool.descriptor.description}")
+    println("Parameters:")
+    tool.descriptor.parameters.forEach { param ->
+        println("  - ${param.name}: ${param.type} (${param.description})")
+    }
+    println()
+}
+```
+
+## Testing with Registries
+
+### Mock Registries
+
+Create test registries:
+
+```kotlin
+@Test
+fun testAgentWithMockTools() = runTest {
+    val mockTool = MockSearchTool()
+    val testRegistry = ToolRegistry {
+        tool(mockTool)
+    }
+    
+    val agent = AIAgent(
+        promptExecutor = testExecutor,
+        llmModel = OpenAIModels.Chat.GPT4o,
+        toolRegistry = testRegistry
+    )
+    
+    agent.run("search for kotlin")
+    
+    assertTrue(mockTool.wasCalled)
+}
+```
+
+### Verify Tool Registration
+
+```kotlin
+@Test
+fun testToolRegistryComposition() {
+    val registry1 = ToolRegistry {
+        tool(Tool1())
+        tool(Tool2())
+    }
+    
+    val registry2 = ToolRegistry {
+        tool(Tool3())
+    }
+    
+    val combined = registry1 + registry2
+    
+    assertEquals(3, combined.tools.size)
+    assertNotNull(combined.getToolOrNull("tool1"))
+    assertNotNull(combined.getToolOrNull("tool2"))
+    assertNotNull(combined.getToolOrNull("tool3"))
+}
+```
+
+## Best Practices
+
+### Organization
+
+1. **Group related tools**: Use ToolSets for cohesive functionality
+2. **Create factory functions**: Build registries with clear dependencies
+3. **Document tool collections**: Explain what each registry provides
+
+### Performance
+
+1. **Build once**: Create registries at startup, not per-request
+2. **Avoid large registries**: Too many tools can confuse the LLM
+3. **Use subgraphs with tool subsets**: Limit tools to what's needed
+
+```kotlin
+val strategy = strategy<Input, Output>("strategy") {
+    // Use only relevant tools in each subgraph
+    val step1 = subgraphWithTask<A, B>(tools = searchTools) { /*...*/ }
+    val step2 = subgraphWithTask<B, C>(tools = weatherTools) { /*...*/ }
+    
+    nodeStart then step1 then step2 then nodeFinish
+}
+```
+
+### Security
+
+<Warning>
+**Principle of Least Privilege**: Only register tools the agent actually needs.
+
+```kotlin
+// ❌ Bad: Giving all tools
+val toolRegistry = ToolRegistry {
+    tools(allSystemTools)  // Includes dangerous operations
+}
+
+// ✅ Good: Only necessary tools
+val toolRegistry = ToolRegistry {
+    tool(SearchTool())
+    tool(WeatherTool())
+    // No file system or database access
+}
+```
+</Warning>
+
+## Common Patterns
+
+### Lazy Registration
+
+Defer expensive tool creation:
+
+```kotlin
+class LazyToolRegistry {
+    private val expensiveTool by lazy { ExpensiveTool() }
+    
+    fun create(): ToolRegistry = ToolRegistry {
+        tool(expensiveTool)  // Only created when needed
+    }
+}
+```
+
+### Registry Composition
+
+Build complex registries from smaller ones:
+
+```kotlin
+fun createBaseRegistry() = ToolRegistry {
+    tool(SearchTool())
+    tool(CalculatorTool())
+}
+
+fun createExtendedRegistry(apiKey: String) = 
+    createBaseRegistry() + ToolRegistry {
+        tool(WeatherTool(apiKey))
+        tool(TranslationTool(apiKey))
+    }
+
+fun createEnterpriseRegistry(config: Config) =
+    createExtendedRegistry(config.apiKey) + ToolRegistry {
+        tools(DatabaseTools(config.dbConfig))
+        tools(EmailTools(config.emailConfig))
+    }
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tools" icon="wrench" href="/concepts/tools">
+    Learn about creating tools
+  </Card>
+  <Card title="Strategies" icon="diagram-project" href="/concepts/strategies">
+    Use tools in strategies
+  </Card>
+  <Card title="MCP Integration" icon="plug" href="/integrations/mcp">
+    Use Model Context Protocol tools
+  </Card>
+  <Card title="Testing" icon="flask" href="/testing/tools">
+    Test tool registries
+  </Card>
+</CardGroup>

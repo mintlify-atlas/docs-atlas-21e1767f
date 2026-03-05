@@ -1,0 +1,533 @@
+---
+title: Tool
+description: Base class for creating executable tools that AI agents can invoke
+---
+
+## Overview
+
+`Tool` is the base class for creating tools that can be invoked by LLMs during agent execution. Tools enable agents to interact with external systems, perform computations, retrieve data, and take actions.
+
+<Warning>
+  Never call `tool.execute()` directly in agent code. Always use the `AIAgentEnvironment` interface to ensure proper event handling, feature pipeline integration, and testing support.
+</Warning>
+
+## Class Definition
+
+```kotlin
+public abstract class Tool<TArgs, TResult>(
+    public val argsSerializer: KSerializer<TArgs>,
+    public val resultSerializer: KSerializer<TResult>,
+    public val descriptor: ToolDescriptor,
+    public val metadata: Map<String, String> = emptyMap()
+)
+```
+
+### Type Parameters
+
+<ParamField path="TArgs" type="Generic">
+  The type of arguments the tool accepts
+</ParamField>
+
+<ParamField path="TResult" type="Generic">
+  The type of result the tool returns
+</ParamField>
+
+## Constructor Parameters
+
+<ParamField path="argsSerializer" type="KSerializer<TArgs>" required>
+  KotlinX Serialization serializer for encoding/decoding tool arguments
+</ParamField>
+
+<ParamField path="resultSerializer" type="KSerializer<TResult>" required>
+  KotlinX Serialization serializer for encoding/decoding tool results
+</ParamField>
+
+<ParamField path="descriptor" type="ToolDescriptor" required>
+  Schema describing the tool's name, description, and parameters for the LLM
+</ParamField>
+
+<ParamField path="metadata" type="Map<String, String>" default="emptyMap()">
+  Arbitrary metadata associated with the tool
+</ParamField>
+
+## Convenience Constructor
+
+Simplified constructor that generates the descriptor automatically:
+
+```kotlin
+public constructor(
+    argsSerializer: KSerializer<TArgs>,
+    resultSerializer: KSerializer<TResult>,
+    name: String,
+    description: String
+)
+```
+
+<ParamField path="name" type="String" required>
+  The name of the tool (used by LLM to invoke it)
+</ParamField>
+
+<ParamField path="description" type="String" required>
+  Human-readable explanation of what the tool does (helps LLM understand when to use it)
+</ParamField>
+
+## Properties
+
+<ResponseField name="name" type="String">
+  The name of the tool from the descriptor
+</ResponseField>
+
+<ResponseField name="argsSerializer" type="KSerializer<TArgs>">
+  Serializer for tool arguments
+</ResponseField>
+
+<ResponseField name="resultSerializer" type="KSerializer<TResult>">
+  Serializer for tool results
+</ResponseField>
+
+<ResponseField name="descriptor" type="ToolDescriptor">
+  Tool schema for LLM consumption
+</ResponseField>
+
+<ResponseField name="metadata" type="Map<String, String>">
+  Tool metadata
+</ResponseField>
+
+<ResponseField name="json" type="Json" protected>
+  JSON configuration used for encoding/decoding (can be overridden)
+</ResponseField>
+
+## Abstract Methods
+
+### execute
+
+Executes the tool's logic with the provided arguments.
+
+```kotlin
+public abstract suspend fun execute(args: TArgs): TResult
+```
+
+<ParamField path="args" type="TArgs" required>
+  The input arguments required to execute the tool
+</ParamField>
+
+<ResponseField name="return" type="TResult">
+  The result of the tool's execution
+</ResponseField>
+
+<Warning>
+  In agent code, use `environment.executeTool()` instead of calling this method directly.
+</Warning>
+
+## Encoding/Decoding Methods
+
+### decodeArgs
+
+Decodes raw JSON arguments into typed arguments.
+
+```kotlin
+public fun decodeArgs(rawArgs: JsonObject): TArgs
+```
+
+### encodeArgs
+
+Encodes typed arguments into JSON.
+
+```kotlin
+public fun encodeArgs(args: TArgs): JsonObject
+```
+
+### decodeResult
+
+Decodes raw JSON result into typed result.
+
+```kotlin
+public fun decodeResult(rawResult: JsonElement): TResult
+```
+
+### encodeResult
+
+Encodes typed result into JSON.
+
+```kotlin
+public fun encodeResult(result: TResult): JsonElement
+```
+
+### encodeResultToString
+
+Encodes result to string representation for LLM.
+
+```kotlin
+public open fun encodeResultToString(result: TResult): String
+```
+
+<Note>
+  Override this method to customize how results are presented to the LLM.
+</Note>
+
+## Implementation Examples
+
+### Basic Tool
+
+```kotlin
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.serializer
+
+class CalculatorTool : Tool<CalculatorTool.Args, Int>(
+    argsSerializer = serializer(),
+    resultSerializer = serializer(),
+    name = "calculator",
+    description = "Performs arithmetic operations on two numbers"
+) {
+    @Serializable
+    data class Args(
+        val operation: Operation,
+        val a: Int,
+        val b: Int
+    )
+    
+    enum class Operation { ADD, SUBTRACT, MULTIPLY, DIVIDE }
+    
+    override suspend fun execute(args: Args): Int {
+        return when (args.operation) {
+            Operation.ADD -> args.a + args.b
+            Operation.SUBTRACT -> args.a - args.b
+            Operation.MULTIPLY -> args.a * args.b
+            Operation.DIVIDE -> args.a / args.b
+        }
+    }
+}
+```
+
+### Tool with Custom Result
+
+```kotlin
+@Serializable
+data class SearchResult(
+    val title: String,
+    val url: String,
+    val snippet: String
+)
+
+class WebSearchTool : Tool<WebSearchTool.Args, List<SearchResult>>(
+    argsSerializer = serializer(),
+    resultSerializer = serializer(),
+    name = "web_search",
+    description = "Searches the web for information"
+) {
+    @Serializable
+    data class Args(
+        val query: String,
+        val maxResults: Int = 5
+    )
+    
+    override suspend fun execute(args: Args): List<SearchResult> {
+        // Perform web search
+        return searchEngine.search(args.query, args.maxResults)
+    }
+    
+    override fun encodeResultToString(result: List<SearchResult>): String {
+        // Custom formatting for LLM
+        return result.joinToString("\n\n") { searchResult ->
+            """Title: ${searchResult.title}
+            |URL: ${searchResult.url}
+            |Snippet: ${searchResult.snippet}""".trimMargin()
+        }
+    }
+}
+```
+
+### SimpleTool (String Results)
+
+For tools that return string results:
+
+```kotlin
+class WeatherTool : SimpleTool<WeatherTool.Args>(
+    argsSerializer = serializer(),
+    name = "get_weather",
+    description = "Gets current weather for a location"
+) {
+    @Serializable
+    data class Args(
+        val location: String,
+        val units: String = "celsius"
+    )
+    
+    override suspend fun execute(args: Args): String {
+        val weather = weatherApi.getCurrentWeather(args.location)
+        return "Temperature: ${weather.temp}°${args.units}, " +
+               "Conditions: ${weather.conditions}"
+    }
+}
+```
+
+### Tool with External API
+
+```kotlin
+class GitHubTool(
+    private val apiToken: String
+) : Tool<GitHubTool.Args, GitHubTool.Result>(
+    argsSerializer = serializer(),
+    resultSerializer = serializer(),
+    name = "github_get_repo",
+    description = "Fetches information about a GitHub repository"
+) {
+    @Serializable
+    data class Args(
+        val owner: String,
+        val repo: String
+    )
+    
+    @Serializable
+    data class Result(
+        val name: String,
+        val description: String,
+        val stars: Int,
+        val forks: Int,
+        val language: String
+    )
+    
+    override suspend fun execute(args: Args): Result {
+        val client = HttpClient {
+            install(ContentNegotiation) {
+                json()
+            }
+        }
+        
+        try {
+            val response = client.get(
+                "https://api.github.com/repos/${args.owner}/${args.repo}"
+            ) {
+                header("Authorization", "token $apiToken")
+            }
+            
+            return response.body()
+        } finally {
+            client.close()
+        }
+    }
+}
+```
+
+### Tool with Error Handling
+
+```kotlin
+class DatabaseQueryTool(
+    private val database: Database
+) : SimpleTool<DatabaseQueryTool.Args>(
+    argsSerializer = serializer(),
+    name = "query_database",
+    description = "Executes a SQL query against the database"
+) {
+    @Serializable
+    data class Args(
+        val query: String
+    )
+    
+    override suspend fun execute(args: Args): String {
+        return try {
+            val results = database.query(args.query)
+            "Query successful: ${results.size} rows returned\n" +
+            results.joinToString("\n")
+        } catch (e: SQLException) {
+            "Database error: ${e.message}"
+        } catch (e: Exception) {
+            "Unexpected error: ${e.message}"
+        }
+    }
+}
+```
+
+### Tool with Metadata
+
+```kotlin
+class FileOperationTool : Tool<FileOperationTool.Args, String>(
+    argsSerializer = serializer(),
+    resultSerializer = String.serializer(),
+    name = "file_operation",
+    description = "Performs file system operations",
+    metadata = mapOf(
+        "category" to "filesystem",
+        "riskLevel" to "high",
+        "requiresPermission" to "true"
+    )
+) {
+    @Serializable
+    data class Args(
+        val operation: String,
+        val path: String
+    )
+    
+    override suspend fun execute(args: Args): String {
+        // Check metadata before execution
+        if (metadata["requiresPermission"] == "true") {
+            checkPermissions()
+        }
+        
+        // Perform operation
+        return performFileOperation(args.operation, args.path)
+    }
+}
+```
+
+## Usage in Agent
+
+### Register Tools
+
+```kotlin
+val toolRegistry = ToolRegistry {
+    tool(CalculatorTool())
+    tool(WebSearchTool())
+    tool(WeatherTool())
+}
+
+val agent = AIAgent(
+    promptExecutor = executor,
+    agentConfig = config,
+    strategy = strategy,
+    toolRegistry = toolRegistry
+)
+```
+
+### Execute Through Environment
+
+```kotlin
+class MyStrategy : AIAgentGraphStrategy<String, String> {
+    override val name = "my-strategy"
+    
+    override suspend fun execute(
+        context: AIAgentGraphContext,
+        input: String
+    ): String? {
+        val response = context.llm.prompt {
+            user(input)
+        }.execute()
+        
+        // LLM decides to use a tool
+        if (response is Message.Assistant.ToolCall) {
+            // Execute through environment (correct way)
+            val results = context.environment.executeTools(
+                response.toolCalls
+            )
+            
+            // Send results back to LLM
+            return context.llm.prompt {
+                results.forEach { result ->
+                    tool(result)
+                }
+            }.execute().content
+        }
+        
+        return response.content
+    }
+}
+```
+
+## Testing Tools
+
+### Unit Test a Tool
+
+```kotlin
+@Test
+fun testCalculatorTool() = runTest {
+    val tool = CalculatorTool()
+    
+    val result = tool.execute(
+        CalculatorTool.Args(
+            operation = CalculatorTool.Operation.ADD,
+            a = 5,
+            b = 3
+        )
+    )
+    
+    assertEquals(8, result)
+}
+```
+
+### Mock Tools in Agents
+
+```kotlin
+val agent = AIAgent(...) {
+    withTesting()
+    
+    mockTool(WeatherTool) alwaysReturns "Sunny, 25°C"
+    
+    mockTool(SearchTool) returns SearchResult(...) onArgumentsMatching {
+        args.query.contains("important")
+    }
+}
+```
+
+## Best Practices
+
+<Note>
+  **Tool Design**
+  
+  - Keep tool names descriptive and lowercase with underscores
+  - Write clear descriptions that explain when to use the tool
+  - Use `@Serializable` data classes for arguments and complex results
+  - Handle errors gracefully and return meaningful error messages
+  - Consider timeout limits for long-running operations
+</Note>
+
+<Warning>
+  **Security Considerations**
+  
+  - Validate all tool arguments before execution
+  - Sanitize inputs to prevent injection attacks
+  - Use metadata to mark dangerous operations
+  - Implement permission checks for sensitive tools
+  - Never trust LLM-provided data without validation
+</Warning>
+
+## Advanced Features
+
+### Custom JSON Configuration
+
+```kotlin
+class CustomTool : Tool<Args, Result>(...) {
+    override val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = false
+        prettyPrint = false
+    }
+}
+```
+
+### Dynamic Tool Generation
+
+Generate tools from functions using reflection (JVM only):
+
+```kotlin
+fun searchWeb(query: String, maxResults: Int = 5): List<SearchResult> {
+    // Implementation
+}
+
+val tool = ToolFromCallable(::searchWeb)
+```
+
+### Tool Sets
+
+Group related tools into sets (JVM only):
+
+```kotlin
+class FileToolSet {
+    fun readFile(path: String): String { /* ... */ }
+    fun writeFile(path: String, content: String) { /* ... */ }
+    fun deleteFile(path: String) { /* ... */ }
+}
+
+val toolSet = FileToolSet()
+val tools = toolSet.asTools()
+```
+
+## Related Types
+
+- [ToolRegistry](/api/tool-registry) - Manages collections of tools
+- [ToolDescriptor](/api/tool-descriptors) - Describes tool schema for LLMs
+- [AIAgentEnvironment](/api/ai-agent-environment) - Safe tool execution interface
+- [SimpleTool](#simpletool-string-results) - Simplified tool for string results
+
+## Source Reference
+
+Defined in: `agents-tools/src/commonMain/kotlin/ai/koog/agents/core/tools/Tool.kt`

@@ -1,0 +1,532 @@
+---
+title: "Tools"
+description: "Creating and using tools to extend AI agent capabilities"
+---
+
+## Overview
+
+Tools are the hands of your AI agent - they allow the agent to interact with external systems, perform computations, and retrieve information. In Koog, tools are type-safe, serializable functions that can be invoked by the LLM during agent execution.
+
+## Tool Anatomy
+
+A tool in Koog consists of:
+
+- **Arguments (`TArgs`)**: Type-safe input parameters
+- **Result (`TResult`)**: Type-safe return value
+- **Descriptor**: Name, description, and parameter schema for the LLM
+- **Execution Logic**: The actual implementation
+
+## Tool Base Class
+
+```kotlin
+public abstract class Tool<TArgs, TResult>(
+    public val argsSerializer: KSerializer<TArgs>,
+    public val resultSerializer: KSerializer<TResult>,
+    public val descriptor: ToolDescriptor,
+    public val metadata: Map<String, String> = emptyMap()
+) {
+    public val name: String get() = descriptor.name
+    
+    public abstract suspend fun execute(args: TArgs): TResult
+}
+```
+
+## Creating Tools
+
+### Using Annotations (Recommended)
+
+The simplest way to create tools is with the `@Tool` annotation:
+
+```kotlin
+class WeatherTools(private val apiClient: OpenMeteoClient) : ToolSet {
+    @Tool
+    @LLMDescription("Get weather forecast for a location and date range")
+    suspend fun getWeatherForecast(
+        @LLMDescription("Location name (e.g., 'Paris', 'London')")
+        location: String,
+        
+        @LLMDescription("ISO 3166-1 alpha-2 country code (e.g., 'FR', 'GB')")
+        countryCodeISO2: String,
+        
+        @LLMDescription("Start date in ISO format (e.g., '2024-06-01')")
+        startDate: String,
+        
+        @LLMDescription("End date in ISO format (e.g., '2024-06-07')")
+        endDate: String,
+        
+        @LLMDescription("Granularity of forecast: DAILY or HOURLY")
+        granularity: ForecastGranularity
+    ): String {
+        val forecast = apiClient.getWeatherForecast(
+            location = location,
+            countryCode = countryCodeISO2,
+            startDate = LocalDate.parse(startDate),
+            endDate = LocalDate.parse(endDate),
+            granularity = granularity
+        )
+        
+        return formatForecast(forecast)
+    }
+}
+```
+
+<Note>
+The `@LLMDescription` annotation provides context to the LLM about what the tool does and what each parameter means. Clear descriptions improve tool selection and usage.
+</Note>
+
+### Manual Tool Creation
+
+For more control, extend the `Tool` class directly:
+
+```kotlin
+@Serializable
+data class SearchArgs(
+    val query: String,
+    val maxResults: Int = 10
+)
+
+@Serializable
+data class SearchResult(
+    val items: List<String>,
+    val count: Int
+)
+
+class SearchTool : Tool<SearchArgs, SearchResult>(
+    argsSerializer = SearchArgs.serializer(),
+    resultSerializer = SearchResult.serializer(),
+    name = "search",
+    description = "Search for information on the web"
+) {
+    override suspend fun execute(args: SearchArgs): SearchResult {
+        // Implement search logic
+        val items = performSearch(args.query, args.maxResults)
+        return SearchResult(
+            items = items,
+            count = items.size
+        )
+    }
+    
+    private suspend fun performSearch(query: String, max: Int): List<String> {
+        // Your search implementation
+        return listOf()
+    }
+}
+```
+
+### Function-Based Tools
+
+Create tools from regular Kotlin functions:
+
+```kotlin
+@Tool
+@LLMDescription("Add days to a date")
+fun addDate(
+    @LLMDescription("Base date in ISO format (e.g., '2024-06-01')")
+    date: String,
+    
+    @LLMDescription("Number of days to add")
+    days: Int
+): String {
+    val baseDate = LocalDate.parse(date)
+    val newDate = baseDate.plus(DatePeriod(days = days))
+    return newDate.toString()
+}
+
+// Register in tool registry
+val toolRegistry = ToolRegistry {
+    tool(::addDate)
+}
+```
+
+## Tool Execution
+
+<Warning>
+**Direct Tool Calls**: Never call tools directly in agent code. Always use the environment:
+
+```kotlin
+// ❌ DON'T
+val result = myTool.execute(args)
+
+// ✅ DO
+val toolCall = Message.Tool.Call(name = "myTool", arguments = args)
+val result = context.environment.executeTool(toolCall)
+```
+
+Direct calls bypass:
+- Event handler notifications
+- Feature pipeline processing  
+- Testing/mocking infrastructure
+</Warning>
+
+### Tool Execution Flow
+
+1. **LLM Request**: Agent calls LLM with available tools
+2. **Tool Selection**: LLM decides which tool to call
+3. **Argument Parsing**: Tool arguments are decoded from JSON
+4. **Environment Execution**: Tool runs in safe environment context
+5. **Result Encoding**: Result is serialized back to JSON
+6. **LLM Response**: Result is sent back to LLM
+
+## Argument Serialization
+
+Tools use KotlinX Serialization for arguments and results:
+
+```kotlin
+@Serializable
+data class ToolArgs(
+    val param1: String,
+    val param2: Int,
+    val optional: String? = null
+)
+
+// Encoding
+val json = tool.encodeArgs(ToolArgs("test", 42))
+
+// Decoding
+val args = tool.decodeArgs(json)
+```
+
+### Primitive Arguments
+
+For simple tools with primitive arguments:
+
+```kotlin
+@Tool
+@LLMDescription("Calculate the square of a number")
+fun square(
+    @LLMDescription("The number to square")
+    n: Double
+): Double = n * n
+```
+
+### Complex Arguments
+
+For structured data:
+
+```kotlin
+@Serializable
+data class EmailArgs(
+    val to: String,
+    val subject: String,
+    val body: String,
+    val attachments: List<String> = emptyList(),
+    val priority: Priority = Priority.NORMAL
+)
+
+@Serializable
+enum class Priority { LOW, NORMAL, HIGH, URGENT }
+
+@Tool
+@LLMDescription("Send an email")
+suspend fun sendEmail(args: EmailArgs): String {
+    // Send email
+    return "Email sent to ${args.to}"
+}
+```
+
+## Result Encoding
+
+### String Results
+
+The simplest approach - return formatted strings:
+
+```kotlin
+@Tool
+@LLMDescription("Get weather forecast")
+suspend fun getWeather(
+    location: String,
+    date: String
+): String {
+    val forecast = apiClient.getForecast(location, date)
+    
+    return markdown {
+        h1("Weather for $location on $date")
+        +"Temperature: ${forecast.temp}°C"
+        +"Conditions: ${forecast.conditions}"
+        +"Precipitation: ${forecast.precipitation}%"
+    }
+}
+```
+
+### Structured Results
+
+For programmatic processing:
+
+```kotlin
+@Serializable
+data class WeatherResult(
+    val location: String,
+    val date: String,
+    val temperature: Double,
+    val conditions: String,
+    val precipitation: Int
+)
+
+@Tool
+@LLMDescription("Get weather forecast")
+suspend fun getWeatherStructured(
+    location: String,
+    date: String
+): WeatherResult {
+    val forecast = apiClient.getForecast(location, date)
+    return WeatherResult(
+        location = location,
+        date = date,
+        temperature = forecast.temp,
+        conditions = forecast.conditions,
+        precipitation = forecast.precipitation
+    )
+}
+```
+
+### Custom Encoding
+
+Override encoding for custom formatting:
+
+```kotlin
+class MyTool : Tool<Args, Result>(...) {
+    override fun encodeResultToString(result: Result): String {
+        // Custom formatting for LLM
+        return "Result: ${result.value} (processed at ${result.timestamp})"
+    }
+}
+```
+
+## ToolSets
+
+Group related tools together:
+
+```kotlin
+class UserTools(
+    private val showMessage: suspend (String) -> String
+) : ToolSet {
+    @Tool
+    @LLMDescription("Show a message to the user and get their response")
+    suspend fun askUser(
+        @LLMDescription("The message to show")
+        message: String
+    ): String {
+        return showMessage(message)
+    }
+    
+    @Tool
+    @LLMDescription("Confirm an action with the user")
+    suspend fun confirmAction(
+        @LLMDescription("The action to confirm")
+        action: String
+    ): Boolean {
+        val response = showMessage("Confirm: $action (yes/no)")
+        return response.lowercase() == "yes"
+    }
+}
+
+// Register all tools from the set
+val toolRegistry = ToolRegistry {
+    tools(userTools)  // Automatically discovers @Tool annotated methods
+}
+```
+
+## Tool Metadata
+
+Attach metadata to tools:
+
+```kotlin
+class MyTool : Tool<Args, Result>(
+    argsSerializer = Args.serializer(),
+    resultSerializer = Result.serializer(),
+    descriptor = descriptor,
+    metadata = mapOf(
+        "version" to "1.0",
+        "category" to "data-processing",
+        "rateLimit" to "100/min"
+    )
+) {
+    override suspend fun execute(args: Args): Result {
+        // Implementation
+    }
+}
+
+// Access metadata
+val version = tool.metadata["version"]
+```
+
+## Error Handling
+
+### Graceful Errors
+
+Return error messages as results:
+
+```kotlin
+@Tool
+@LLMDescription("Search for a user by email")
+suspend fun findUser(
+    @LLMDescription("Email address")
+    email: String
+): String {
+    return try {
+        val user = database.findUserByEmail(email)
+        "Found user: ${user.name} (ID: ${user.id})"
+    } catch (e: UserNotFoundException) {
+        "User not found: $email"
+    } catch (e: Exception) {
+        "Error searching for user: ${e.message}"
+    }
+}
+```
+
+### Reporting Problems
+
+For serious errors, report to the environment:
+
+```kotlin
+class CriticalTool : Tool<Args, Result>(...) {
+    override suspend fun execute(args: Args): Result {
+        try {
+            return performCriticalOperation(args)
+        } catch (e: Exception) {
+            // This will be logged and may terminate the agent
+            throw ToolExecutionException(
+                "Critical operation failed: ${e.message}",
+                cause = e
+            )
+        }
+    }
+}
+```
+
+## Testing Tools
+
+### Unit Testing
+
+Test tools independently:
+
+```kotlin
+@Test
+fun testSearchTool() = runTest {
+    val tool = SearchTool(mockApiClient)
+    val args = SearchArgs(query = "kotlin", maxResults = 5)
+    
+    val result = tool.execute(args)
+    
+    assertEquals(5, result.items.size)
+    assertTrue(result.items.all { it.contains("kotlin", ignoreCase = true) })
+}
+```
+
+### Mocking Tools
+
+Mock tool behavior in agent tests:
+
+```kotlin
+val mockLLMApi = getMockExecutor(toolRegistry, eventHandler) {
+    mockLLMToolCall(SearchTool, SearchArgs("test")) onRequestContains "search"
+    mockTool(SearchTool) returns SearchResult(
+        items = listOf("result1", "result2"),
+        count = 2
+    )
+}
+```
+
+## Best Practices
+
+### Tool Design
+
+1. **Single responsibility**: One tool, one purpose
+2. **Clear descriptions**: Help the LLM understand when to use the tool
+3. **Validate inputs**: Check arguments before processing
+4. **Handle errors gracefully**: Return useful error messages
+5. **Make tools idempotent**: When possible, tools should be safe to retry
+
+### Performance
+
+1. **Async operations**: Use `suspend` for I/O-bound operations
+2. **Timeout protection**: Add timeouts for external API calls
+3. **Caching**: Cache results when appropriate
+4. **Rate limiting**: Respect API rate limits
+
+### Security
+
+<Warning>
+**Validate all inputs**: Never trust tool arguments blindly. Always validate and sanitize.
+
+```kotlin
+@Tool
+suspend fun deleteFile(path: String): String {
+    // ✅ Validate path
+    require(!path.contains("..")) { "Invalid path" }
+    require(path.startsWith("/safe/dir/")) { "Access denied" }
+    
+    deleteFile(path)
+    return "File deleted: $path"
+}
+```
+</Warning>
+
+## Common Tool Patterns
+
+### API Integration
+
+```kotlin
+class APITool(private val client: HttpClient) : Tool<Args, Result>(...) {
+    override suspend fun execute(args: Args): Result {
+        return withTimeout(30.seconds) {
+            client.get("https://api.example.com/data") {
+                parameter("query", args.query)
+            }
+        }
+    }
+}
+```
+
+### Database Access
+
+```kotlin
+@Tool
+@LLMDescription("Query the database")
+suspend fun queryDatabase(
+    @LLMDescription("SQL query to execute")
+    query: String
+): String {
+    // Validate query (whitelist allowed operations)
+    require(query.trim().startsWith("SELECT", ignoreCase = true)) {
+        "Only SELECT queries allowed"
+    }
+    
+    val results = database.execute(query)
+    return formatResults(results)
+}
+```
+
+### File Operations
+
+```kotlin
+@Tool
+@LLMDescription("Read a file")
+suspend fun readFile(
+    @LLMDescription("Path to the file")
+    path: String
+): String {
+    val file = File(path)
+    require(file.exists()) { "File not found: $path" }
+    require(file.length() < 1_000_000) { "File too large" }
+    
+    return file.readText()
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tool Registry" icon="list" href="/concepts/tool-registry">
+    Learn how to manage tool collections
+  </Card>
+  <Card title="Environment" icon="shield" href="/concepts/environment">
+    Understand safe tool execution
+  </Card>
+  <Card title="Strategies" icon="diagram-project" href="/concepts/strategies">
+    Use tools in agent strategies
+  </Card>
+  <Card title="Testing" icon="flask" href="/testing/overview">
+    Test tools and agents
+  </Card>
+</CardGroup>

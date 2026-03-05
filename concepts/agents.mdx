@@ -1,0 +1,332 @@
+---
+title: "Agents"
+description: "Understanding AIAgent - the core orchestrator for building AI agents in Koog"
+---
+
+## Overview
+
+The `AIAgent` is the central component of the Koog framework. It orchestrates the execution of AI workflows by coordinating strategies, tools, features, and LLM communication. An agent manages the complete lifecycle of an AI task, from processing input to generating output.
+
+## Core Responsibilities
+
+An `AIAgent` handles:
+
+- **Strategy Execution**: Runs graph-based or functional workflows
+- **Tool Management**: Coordinates tool execution through `ToolRegistry`
+- **Feature Pipeline**: Manages extensible features for memory, tracing, events, etc.
+- **LLM Communication**: Handles prompt execution and response processing
+- **Session Management**: Creates and manages execution sessions
+
+## Creating an Agent
+
+### Basic Agent Creation
+
+The simplest way to create an agent:
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = toolRegistry,
+    systemPrompt = "You are a helpful assistant.",
+    temperature = 0.3,
+    maxIterations = 50
+)
+```
+
+### Agent with Custom Strategy
+
+Create an agent with a custom graph-based strategy:
+
+```kotlin
+val strategy = strategy<String, String>("custom-strategy") {
+    val askLLM by nodeLLMRequest()
+    val processResult by node<Message.Response, String> { response ->
+        response.content
+    }
+    
+    nodeStart then askLLM then processResult then nodeFinish
+}
+
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = strategy,
+    toolRegistry = toolRegistry
+)
+```
+
+### Agent with Features
+
+Install features to extend agent capabilities:
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = toolRegistry
+) {
+    // Install event handling feature
+    handleEvents {
+        onToolCall { ctx ->
+            println("Tool called: ${ctx.tool.name}")
+        }
+        onAgentCompleted { ctx ->
+            println("Agent finished: ${ctx.result}")
+        }
+    }
+}
+```
+
+## Using the Agent Builder
+
+For more complex configurations, use the builder pattern:
+
+```kotlin
+val agent = AIAgent.builder()
+    .promptExecutor(promptExecutor)
+    .model(OpenAIModels.Chat.GPT4o)
+    .systemPrompt("You are a trip planning assistant.")
+    .temperature(0.3)
+    .maxIterations(100)
+    .toolRegistry(toolRegistry)
+    .strategy(customStrategy)
+    .installFeature { feature ->
+        // Install custom features
+    }
+    .build()
+```
+
+## Agent Configuration
+
+### AIAgentConfig
+
+The `AIAgentConfig` encapsulates agent settings:
+
+```kotlin
+val config = AIAgentConfig(
+    prompt = prompt("agent-prompt") {
+        system("You are a helpful assistant.")
+        params = LLMParams(temperature = 0.3)
+    },
+    model = OpenAIModels.Chat.GPT4o,
+    maxAgentIterations = 50
+)
+
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    agentConfig = config,
+    strategy = strategy,
+    toolRegistry = toolRegistry
+)
+```
+
+<Note>
+The `maxAgentIterations` parameter prevents infinite loops in agent execution. Set it based on your workflow complexity.
+</Note>
+
+## Running the Agent
+
+### Direct Execution
+
+Run the agent and get the result:
+
+```kotlin
+val result = agent.run("Plan a trip to Paris")
+println(result)
+```
+
+### Session-Based Execution
+
+For more control, create a session:
+
+```kotlin
+val session = agent.createSession()
+val result = session.run("Plan a trip to Paris")
+println(result)
+```
+
+### Multiple Runs
+
+Execute the agent multiple times:
+
+```kotlin
+val result1 = agent.run("What's the weather like?")
+val result2 = agent.run("Suggest outdoor activities.")
+```
+
+## Agent Lifecycle
+
+The agent follows this execution flow:
+
+1. **Initialization**: Agent is created with configuration
+2. **Session Creation**: A session is created for each run
+3. **Strategy Execution**: The strategy processes the input through its graph
+4. **Tool Calls**: Tools are executed as needed through the environment
+5. **Feature Pipeline**: Features intercept lifecycle events
+6. **Completion**: Final output is returned
+7. **Cleanup**: Resources are released
+
+```kotlin
+// Properly close the agent when done
+agent.use { agent ->
+    val result = agent.run(input)
+    // Agent is automatically closed
+}
+
+// Or manually close
+agent.close()
+```
+
+## Type-Safe Agents
+
+Create agents with custom input/output types:
+
+```kotlin
+@Serializable
+data class TripRequest(
+    val destination: String,
+    val dates: List<String>,
+    val preferences: List<String>
+)
+
+@Serializable
+data class TripPlan(
+    val itinerary: List<DayPlan>,
+    val recommendations: List<String>
+)
+
+val agent = AIAgent<TripRequest, TripPlan>(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = tripPlanningStrategy,
+    toolRegistry = toolRegistry
+)
+
+val plan = agent.run(TripRequest(
+    destination = "Paris",
+    dates = listOf("2024-06-01", "2024-06-07"),
+    preferences = listOf("museums", "restaurants")
+))
+```
+
+## Agent Properties
+
+### ID
+
+Each agent has a unique identifier:
+
+```kotlin
+val agentId = agent.id
+println("Agent ID: $agentId")
+```
+
+Provide a custom ID during creation:
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = toolRegistry,
+    id = "my-custom-agent-id"
+)
+```
+
+### Configuration
+
+Access the agent's configuration:
+
+```kotlin
+val config = agent.agentConfig
+println("Max iterations: ${config.maxAgentIterations}")
+println("Model: ${config.model.name}")
+```
+
+## Best Practices
+
+<Warning>
+**Resource Management**: Always close agents when done to free resources:
+```kotlin
+agent.use { it.run(input) }
+```
+</Warning>
+
+### Error Handling
+
+Handle errors gracefully:
+
+```kotlin
+try {
+    val result = agent.run(input)
+    println(result)
+} catch (e: Exception) {
+    logger.error("Agent execution failed", e)
+}
+```
+
+### Configuration Tips
+
+1. **Set appropriate max iterations**: Too low may cut off valid workflows; too high may waste resources
+2. **Use temperature wisely**: Lower (0.0-0.3) for deterministic tasks, higher (0.7-1.0) for creative tasks
+3. **Install only needed features**: Each feature adds overhead
+4. **Reuse agents**: Create once, run multiple times for better performance
+
+## Agent Types
+
+Koog provides specialized agent types:
+
+### GraphAIAgent
+
+For graph-based workflows (most common):
+
+```kotlin
+val agent: GraphAIAgent<String, String> = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = singleRunStrategy(),
+    toolRegistry = toolRegistry
+)
+```
+
+### FunctionalAIAgent  
+
+For functional-style workflows:
+
+```kotlin
+val agent: FunctionalAIAgent<String, String> = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = functionalStrategy,
+    toolRegistry = toolRegistry
+)
+```
+
+### PlannerAIAgent
+
+For planning-based workflows:
+
+```kotlin
+val agent: PlannerAIAgent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = plannerStrategy,
+    toolRegistry = toolRegistry
+)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Strategies" icon="diagram-project" href="/concepts/strategies">
+    Learn about execution strategies
+  </Card>
+  <Card title="Tools" icon="wrench" href="/concepts/tools">
+    Understand tool creation and usage
+  </Card>
+  <Card title="Features" icon="puzzle-piece" href="/concepts/features">
+    Extend agent capabilities with features
+  </Card>
+  <Card title="Environment" icon="shield" href="/concepts/environment">
+    Safe tool execution contexts
+  </Card>
+</CardGroup>

@@ -1,0 +1,500 @@
+---
+title: ToolRegistry
+description: Central repository for managing and accessing tools available to AI agents
+---
+
+## Overview
+
+`ToolRegistry` serves as a central repository for all tools available to an agent. It provides functionality to register, retrieve, and merge collections of tools with type-safe access patterns.
+
+<Note>
+  The registry ensures tool name uniqueness and provides both name-based and type-based tool lookup.
+</Note>
+
+## Class Definition
+
+```kotlin
+public class ToolRegistry private constructor(
+    tools: List<Tool<*, *>> = emptyList()
+)
+```
+
+## Properties
+
+<ResponseField name="tools" type="List<Tool<*, *>>">
+  Immutable list of tools currently registered. Returns a copy to prevent external modification.
+</ResponseField>
+
+## Methods
+
+### getToolOrNull
+
+Retrieves a tool by its name, or null if not found.
+
+```kotlin
+public fun getToolOrNull(toolName: String): Tool<*, *>?
+```
+
+<ParamField path="toolName" type="String" required>
+  The name of the tool to retrieve
+</ParamField>
+
+<ResponseField name="return" type="Tool<*, *>?">
+  The tool with the specified name, or null if not found
+</ResponseField>
+
+### getTool (by name)
+
+Retrieves a tool by its name.
+
+```kotlin
+public fun getTool(toolName: String): Tool<*, *>
+```
+
+<ParamField path="toolName" type="String" required>
+  The name of the tool to retrieve
+</ParamField>
+
+<ResponseField name="return" type="Tool<*, *>">
+  The tool with the specified name
+</ResponseField>
+
+<ResponseField name="throws" type="IllegalArgumentException">
+  If no tool with the specified name is found
+</ResponseField>
+
+### getTool (by type)
+
+Retrieves a tool by its type.
+
+```kotlin
+public inline fun <reified T : Tool<*, *>> getTool(): T
+```
+
+<ParamField path="T" type="Tool<*, *>" required>
+  The type of tool to retrieve
+</ParamField>
+
+<ResponseField name="return" type="T">
+  The tool of the specified type
+</ResponseField>
+
+<ResponseField name="throws" type="IllegalArgumentException">
+  If no tool of the specified type is found
+</ResponseField>
+
+### plus
+
+Combines tools from this registry with another registry.
+
+```kotlin
+public operator fun plus(toolRegistry: ToolRegistry): ToolRegistry
+```
+
+<ParamField path="toolRegistry" type="ToolRegistry" required>
+  The other ToolRegistry to merge with
+</ParamField>
+
+<ResponseField name="return" type="ToolRegistry">
+  A new ToolRegistry containing the combined list of tools (deduplicated by name)
+</ResponseField>
+
+### add
+
+Adds a tool to the registry if not already present.
+
+```kotlin
+public fun add(tool: Tool<*, *>)
+```
+
+<ParamField path="tool" type="Tool<*, *>" required>
+  The tool to be added
+</ParamField>
+
+<Warning>
+  ToolRegistry is internally mutable but should be treated as immutable after creation. Use the builder pattern or `+` operator for combining registries.
+</Warning>
+
+### addAll
+
+Adds multiple tools to the registry.
+
+```kotlin
+public fun addAll(vararg tools: Tool<*, *>)
+```
+
+<ParamField path="tools" type="vararg Tool<*, *>" required>
+  The tools to be added
+</ParamField>
+
+## Factory Methods
+
+### invoke (DSL)
+
+Creates a registry using a builder DSL.
+
+```kotlin
+public operator fun invoke(
+    init: Builder.() -> Unit
+): ToolRegistry
+```
+
+<ParamField path="init" type="Builder.() -> Unit" required>
+  Lambda that configures the registry by adding tools
+</ParamField>
+
+<ResponseField name="return" type="ToolRegistry">
+  A new configured ToolRegistry instance
+</ResponseField>
+
+### builder (Java API)
+
+Creates a builder for fluent configuration.
+
+```kotlin
+public fun builder(): ToolRegistryBuilder
+```
+
+<ResponseField name="return" type="ToolRegistryBuilder">
+  A new builder instance for constructing a ToolRegistry
+</ResponseField>
+
+### EMPTY
+
+Constant representing an empty registry with no tools.
+
+```kotlin
+public val EMPTY: ToolRegistry
+```
+
+## Usage Examples
+
+### Basic Registry Creation
+
+```kotlin
+val registry = ToolRegistry {
+    tool(CalculatorTool())
+    tool(WebSearchTool())
+    tool(WeatherTool())
+}
+```
+
+### Retrieve Tool by Name
+
+```kotlin
+val registry = ToolRegistry {
+    tool(CalculatorTool())
+    tool(SearchTool())
+}
+
+// Safe retrieval
+val tool = registry.getToolOrNull("calculator")
+if (tool != null) {
+    println("Found tool: ${tool.name}")
+}
+
+// Direct retrieval (throws if not found)
+try {
+    val searchTool = registry.getTool("web_search")
+    println("Found: ${searchTool.name}")
+} catch (e: IllegalArgumentException) {
+    println("Tool not found")
+}
+```
+
+### Retrieve Tool by Type
+
+```kotlin
+val registry = ToolRegistry {
+    tool(CalculatorTool())
+    tool(WeatherTool())
+}
+
+// Type-safe retrieval
+val calculator = registry.getTool<CalculatorTool>()
+println("Calculator tool: ${calculator.name}")
+
+// Will throw if tool not registered
+try {
+    val search = registry.getTool<WebSearchTool>()
+} catch (e: IllegalArgumentException) {
+    println("WebSearchTool not in registry")
+}
+```
+
+### Merge Registries
+
+```kotlin
+val baseTools = ToolRegistry {
+    tool(CalculatorTool())
+    tool(DateTimeTool())
+}
+
+val searchTools = ToolRegistry {
+    tool(WebSearchTool())
+    tool(DatabaseSearchTool())
+}
+
+// Combine registries
+val allTools = baseTools + searchTools
+
+println("Total tools: ${allTools.tools.size}")
+// Output: Total tools: 4
+```
+
+### Conditional Tool Registration
+
+```kotlin
+val registry = ToolRegistry {
+    tool(CalculatorTool())
+    
+    if (hasInternetAccess) {
+        tool(WebSearchTool())
+        tool(ApiCallTool())
+    }
+    
+    if (hasFileAccess) {
+        tool(ReadFileTool())
+        tool(WriteFileTool())
+    }
+}
+```
+
+### Dynamic Tool Lists
+
+```kotlin
+val toolInstances = listOf(
+    CalculatorTool(),
+    WeatherTool(),
+    SearchTool()
+)
+
+val registry = ToolRegistry {
+    tools(toolInstances)
+}
+```
+
+### Builder Pattern (Java API)
+
+```kotlin
+val registry = ToolRegistry.builder()
+    .tool(CalculatorTool())
+    .tool(WeatherTool())
+    .tool(SearchTool())
+    .build()
+```
+
+### Iterate Over Tools
+
+```kotlin
+val registry = ToolRegistry {
+    tool(CalculatorTool())
+    tool(WeatherTool())
+    tool(SearchTool())
+}
+
+// Access all tools
+registry.tools.forEach { tool ->
+    println("Tool: ${tool.name} - ${tool.descriptor.description}")
+}
+```
+
+### Registry with Agent
+
+```kotlin
+val toolRegistry = ToolRegistry {
+    tool(CalculatorTool())
+    tool(WebSearchTool())
+    tool(WeatherTool())
+}
+
+val agent = AIAgent(
+    promptExecutor = executor,
+    agentConfig = config,
+    strategy = strategy,
+    toolRegistry = toolRegistry
+)
+
+val result = agent.run("What's 15 * 24?")
+println(result)
+```
+
+### Empty Registry
+
+```kotlin
+// Agent with no tools
+val agent = AIAgent(
+    promptExecutor = executor,
+    agentConfig = config,
+    strategy = strategy,
+    toolRegistry = ToolRegistry.EMPTY
+)
+```
+
+### Modular Tool Organization
+
+```kotlin
+object ToolSets {
+    val math = ToolRegistry {
+        tool(CalculatorTool())
+        tool(StatisticsTool())
+        tool(GeometryTool())
+    }
+    
+    val web = ToolRegistry {
+        tool(WebSearchTool())
+        tool(HttpRequestTool())
+        tool(WebScraperTool())
+    }
+    
+    val files = ToolRegistry {
+        tool(ReadFileTool())
+        tool(WriteFileTool())
+        tool(ListDirectoryTool())
+    }
+}
+
+// Combine as needed
+val fullRegistry = ToolSets.math + ToolSets.web
+val readOnlyRegistry = ToolSets.web + ToolRegistry {
+    tool(ReadFileTool())
+}
+```
+
+### Tool Registry Inspection
+
+```kotlin
+val registry = ToolRegistry {
+    tool(CalculatorTool())
+    tool(WeatherTool())
+    tool(SearchTool())
+}
+
+// Check if tool exists
+if (registry.getToolOrNull("calculator") != null) {
+    println("Calculator available")
+}
+
+// Get all tool names
+val toolNames = registry.tools.map { it.name }
+println("Available tools: ${toolNames.joinToString(", ")}")
+
+// Get all tool descriptors for LLM
+val descriptors = registry.tools.map { it.descriptor }
+```
+
+## Builder API
+
+The Builder class provides methods for constructing registries:
+
+```kotlin
+class Builder {
+    fun tool(tool: Tool<*, *>)
+    fun tools(toolsList: List<Tool<*, *>>)
+    fun build(): ToolRegistry
+}
+```
+
+### Builder Usage
+
+```kotlin
+val builder = ToolRegistry.Builder()
+builder.tool(CalculatorTool())
+builder.tool(WeatherTool())
+
+if (enableSearch) {
+    builder.tool(SearchTool())
+}
+
+val registry = builder.build()
+```
+
+## Platform-Specific Features
+
+### JVM: Reflection-Based Registration
+
+```kotlin
+// Register tools from annotated methods
+class MyToolSet {
+    @Tool("calculator", "Performs calculations")
+    fun calculate(operation: String, a: Int, b: Int): Int {
+        // Implementation
+    }
+    
+    @Tool("search", "Searches the web")
+    fun search(query: String): String {
+        // Implementation
+    }
+}
+
+val toolSet = MyToolSet()
+val registry = toolSet.asToolRegistry()
+```
+
+### MCP (Model Context Protocol) Integration
+
+```kotlin
+// Register tools from MCP server
+val mcpRegistry = McpToolRegistryProvider.fromServer(
+    serverUrl = "http://localhost:3000"
+)
+
+val combinedRegistry = localTools + mcpRegistry
+```
+
+## Best Practices
+
+<Note>
+  **Registry Organization**
+  
+  - Group related tools into logical sets
+  - Use the `+` operator to compose registries
+  - Keep registries immutable after creation when possible
+  - Name tools consistently (lowercase with underscores)
+  - Ensure tool names are unique within a registry
+</Note>
+
+<Warning>
+  **Performance Considerations**
+  
+  - Tool lookup by type uses reflection and is O(n)
+  - Tool lookup by name is O(n) in the current implementation
+  - Avoid creating multiple registries unnecessarily
+  - Cache registry instances when reusing tool sets
+</Warning>
+
+## Testing
+
+### Mock Registry for Testing
+
+```kotlin
+val mockRegistry = ToolRegistry {
+    tool(object : SimpleTool<Unit>(
+        argsSerializer = Unit.serializer(),
+        name = "test_tool",
+        description = "Test tool"
+    ) {
+        override suspend fun execute(args: Unit): String {
+            return "Test result"
+        }
+    })
+}
+
+val agent = AIAgent(
+    promptExecutor = mockExecutor,
+    agentConfig = config,
+    strategy = strategy,
+    toolRegistry = mockRegistry
+)
+```
+
+## Related Types
+
+- [Tool](/api/tool) - Base class for creating tools
+- [ToolDescriptor](/api/tool-descriptors) - Tool schema for LLMs
+- [AIAgent](/api/ai-agent) - Uses ToolRegistry for tool access
+- [AIAgentEnvironment](/api/ai-agent-environment) - Executes tools from registry
+
+## Source Reference
+
+Defined in: `agents-tools/src/commonMain/kotlin/ai/koog/agents/core/tools/ToolRegistry.kt`

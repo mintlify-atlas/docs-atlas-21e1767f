@@ -1,0 +1,482 @@
+---
+title: Ktor Integration
+description: Build AI-powered web services with Koog agents in Ktor applications
+---
+
+The Ktor integration provides a plugin for seamlessly incorporating Koog AI agents into Ktor server applications with minimal configuration and maximum flexibility.
+
+## Overview
+
+The `koog-ktor` module provides:
+
+- **Ktor Plugin**: Easy installation and configuration
+- **Multi-provider Support**: OpenAI, Anthropic, Google, MistralAI, OpenRouter, DeepSeek, Ollama
+- **Agent Configuration**: Tools, features, and prompt customization
+- **Route Extensions**: Convenient functions for LLM and agent interaction
+- **MCP Integration**: JVM-specific Model Context Protocol support
+- **YAML/CONF Configuration**: File-based or programmatic setup
+
+**Why use Ktor integration?**
+
+- **Lightweight**: Minimal overhead for high-performance services
+- **Flexible**: File-based or code-based configuration
+- **Type Safe**: Full Kotlin DSL with compile-time safety
+- **Coroutine Native**: Built for Kotlin coroutines
+- **Production Ready**: Battle-tested in real applications
+
+## Installation
+
+Add the Ktor integration dependency:
+
+```kotlin gradle
+dependencies {
+    implementation("ai.koog:koog-ktor:$koogVersion")
+}
+```
+
+## Quick Start
+
+### Basic Setup
+
+Install the Koog plugin in your Ktor application:
+
+```kotlin
+import ai.koog.ktor.Koog
+import io.ktor.server.application.*
+
+fun Application.module() {
+    install(Koog) {
+        llm {
+            openAI(apiKey = "your-openai-api-key")
+            anthropic(apiKey = "your-anthropic-api-key")
+            ollama { baseUrl = "http://localhost:11434" }
+        }
+    }
+
+    routing {
+        post("/chat") {
+            val userInput = call.receive<String>()
+            val output = aiAgent(userInput)
+            call.respond(HttpStatusCode.OK, output)
+        }
+    }
+}
+```
+
+**Source**: `koog-ktor/Module.md:48`
+
+## Configuration
+
+### YAML Configuration
+
+Configure providers in `application.yaml`:
+
+```yaml
+koog:
+  openai:
+    apikey: "${OPENAI_API_KEY:your-openai-api-key}"
+  anthropic:
+    apikey: "${ANTHROPIC_API_KEY:your-anthropic-api-key}"
+  google:
+    apikey: "${GOOGLE_API_KEY:your-google-api-key}"
+  mistral:
+    apikey: "${MISTRALAI_API_KEY:your-mistralai-api-key}"
+  openrouter:
+    apikey: "${OPENROUTER_API_KEY:your-openrouter-api-key}"
+  deepseek:
+    apikey: "${DEEPSEEK_API_KEY:your-deepseek-api-key}"
+  ollama:
+    enabled: "${DEBUG:false}"
+```
+
+**Source**: `koog-ktor/Module.md:32`
+
+### CONF Configuration
+
+Or use HOCON format in `application.conf`:
+
+```hocon
+koog {
+  openai {
+    apikey = ${OPENAI_API_KEY}
+    baseUrl = "https://api.openai.com"
+    timeout {
+      requestTimeoutMillis = 30000
+      connectTimeoutMillis = 10000
+      socketTimeoutMillis = 30000
+    }
+  }
+  
+  anthropic {
+    apikey = ${ANTHROPIC_API_KEY}
+    baseUrl = "https://api.anthropic.com"
+    timeout {
+      requestTimeoutMillis = 30000
+    }
+  }
+  
+  ollama {
+    baseUrl = "http://localhost:11434"
+    timeout {
+      requestTimeoutMillis = 60000
+    }
+  }
+}
+```
+
+**Source**: `koog-ktor/Module.md:158`
+
+### Programmatic Configuration
+
+Override or extend file-based configuration:
+
+```kotlin
+install(Koog) {
+    llm {
+        openAI(apiKey = System.getenv("OPENAI_API_KEY") ?: "fallback-key") {
+            baseUrl = "https://api.openai.com"
+            timeouts {
+                requestTimeoutMillis = 30000
+                connectTimeoutMillis = 10000
+                socketTimeoutMillis = 30000
+            }
+        }
+        
+        anthropic(apiKey = System.getenv("ANTHROPIC_API_KEY")) {
+            baseUrl = "https://api.anthropic.com"
+        }
+        
+        // Set fallback LLM
+        fallback {
+            provider = LLMProvider.Ollama
+            model = OllamaModels.Meta.LLAMA_3_2
+        }
+    }
+}
+```
+
+**Source**: `koog-ktor/Module.md:133`
+
+## Route Extensions
+
+Use extension functions in your routes for easy agent interaction:
+
+### Direct LLM Calls
+
+Execute prompts directly:
+
+```kotlin
+import ai.koog.ktor.llm
+import ai.koog.prompt.dsl.prompt
+
+post("/llm-chat") {
+    val userInput = call.receive<String>()
+
+    val response = llm().execute(
+        prompt("request-id") {
+            system(
+                "You are a helpful assistant that can correct user answers. " +
+                "You will get a user's question and your task is to make it more clear."
+            )
+            user(userInput)
+        }, 
+        OllamaModels.Meta.LLAMA_3_2
+    )
+
+    call.respond(HttpStatusCode.OK, response.content)
+}
+```
+
+**Source**: `examples/simple-examples/src/main/kotlin/ai/koog/agents/example/ktor/KtorIntegrationExample.kt:99`
+
+### Content Moderation
+
+Moderate content before processing:
+
+```kotlin
+post("/moderated-chat") {
+    val userInput = call.receive<String>()
+
+    // Moderate content
+    val isHarmful = llm().moderate(
+        prompt("moderation") {
+            user(userInput)
+        }, 
+        OpenAIModels.Moderation.Omni
+    ).isHarmful
+
+    if (isHarmful) {
+        call.respond(HttpStatusCode.BadRequest, "Harmful content detected")
+        return@post
+    }
+
+    val output = aiAgent(userInput)
+    call.respond(HttpStatusCode.OK, output)
+}
+```
+
+**Source**: `examples/simple-examples/src/main/kotlin/ai/koog/agents/example/ktor/KtorIntegrationExample.kt:78`
+
+### AI Agent Execution
+
+Execute agents with strategies:
+
+```kotlin
+import ai.koog.ktor.aiAgent
+import ai.koog.agents.ext.agent.reActStrategy
+
+post("/custom-agent") {
+    val userInput = call.receive<String>()
+
+    // Use default strategy
+    val output = aiAgent(userInput)
+    
+    // Or use custom strategy
+    val output = aiAgent(reActStrategy(), userInput)
+    
+    // Or specify model
+    val output = aiAgent(reActStrategy(), OpenAIModels.Chat.GPT4o, userInput)
+
+    call.respond(HttpStatusCode.OK, output)
+}
+```
+
+**Source**: `examples/simple-examples/src/main/kotlin/ai/koog/agents/example/ktor/KtorIntegrationExample.kt:116`
+
+## Agent Configuration
+
+Configure agent behavior, tools, and features:
+
+```kotlin
+install(Koog) {
+    llm {
+        openAI(apiKey = apiKey)
+    }
+    
+    agent {
+        // Set default model
+        model = OpenAIModels.Chat.GPT4_Turbo
+
+        // Set max iterations
+        maxAgentIterations = 10
+
+        // Register tools
+        registerTools {
+            tool(::searchTool)
+            tool(::calculatorTool)
+            tools(MyToolSet().asTools())
+        }
+
+        // Configure prompt
+        prompt {
+            system("You are a helpful assistant specialized in...")
+        }
+
+        // Install features
+        install(OpenTelemetry) {
+            addSpanExporter(LoggingSpanExporter.create())
+        }
+    }
+}
+```
+
+**Source**: `koog-ktor/Module.md:216`
+
+## MCP Integration
+
+Configure Model Context Protocol integration (JVM only):
+
+```kotlin
+import ai.koog.ktor.mcp
+
+install(Koog) {
+    agentConfig {
+        mcp {
+            // Use Server-Sent Events
+            sse("https://your-mcp-server.com/sse")
+            
+            // Or use process
+            process(yourMcpProcess)
+            
+            // Or use existing client
+            client(yourMcpClient)
+        }
+    }
+}
+```
+
+**Source**: `examples/simple-examples/src/main/kotlin/ai/koog/agents/example/ktor/KtorIntegrationExample.kt:72` and `koog-ktor/Module.md:246`
+
+## Complete Example
+
+Here's a complete Ktor application with tools and features:
+
+```kotlin
+import ai.koog.agents.core.tools.annotations.LLMDescription
+import ai.koog.agents.core.tools.annotations.Tool
+import ai.koog.agents.core.tools.reflect.tool
+import ai.koog.agents.features.opentelemetry.feature.OpenTelemetry
+import ai.koog.ktor.Koog
+import ai.koog.ktor.aiAgent
+import ai.koog.ktor.llm
+import io.ktor.server.application.*
+import io.ktor.server.cio.EngineMain
+import io.opentelemetry.exporter.logging.LoggingSpanExporter
+
+@Tool
+@LLMDescription("Searches in Google and returns the most relevant page URLs")
+fun searchInGoogle(request: String, numberOfPages: String): List<String> {
+    // Implementation
+    return emptyList()
+}
+
+@Tool
+@LLMDescription("Executes bash command")
+fun executeBash(command: String): String {
+    return "bash not supported"
+}
+
+fun main(args: Array<String>) = EngineMain.main(args)
+
+fun Application.main() {
+    // Install the Koog plugin
+    install(Koog) {
+        llm {
+            openAI(apiKey = System.getenv("OPENAI_API_KEY") ?: "override-from-code")
+            fallback { }
+        }
+
+        agentConfig {
+            mcp {
+                sse("http://localhost:8931")
+            }
+
+            registerTools {
+                tool(::searchInGoogle)
+                tool(::executeBash)
+            }
+
+            prompt {
+                system("You are a professional assistant")
+            }
+
+            install(OpenTelemetry) {
+                addSpanExporter(LoggingSpanExporter.create())
+            }
+        }
+    }
+
+    routing {
+        route("api/v1") {
+            get("user") {
+                val userRequest = call.receive<String>()
+                val output = aiAgent(userRequest, OpenAIModels.Chat.GPT4o)
+                call.respond(HttpStatusCode.OK, output)
+            }
+        }
+    }
+}
+```
+
+**Source**: `examples/simple-examples/src/main/kotlin/ai/koog/agents/example/ktor/KtorIntegrationExample.kt`
+
+## Configuration Reference
+
+### LLM Configuration
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `apikey` | String | - | API key for authentication |
+| `baseUrl` | String | Provider default | Base URL for API endpoint |
+| `timeout.requestTimeoutMillis` | Long | 30000 | Request timeout |
+| `timeout.connectTimeoutMillis` | Long | 10000 | Connection timeout |
+| `timeout.socketTimeoutMillis` | Long | 30000 | Socket timeout |
+
+### Agent Configuration
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `model` | LLModel | - | Default LLM model |
+| `maxAgentIterations` | Int | 100 | Maximum agent iterations |
+| `registerTools` | ToolRegistry | Empty | Tool registry builder |
+| `prompt` | Prompt | Empty | Default system prompt |
+
+## Best Practices
+
+1. **Use Environment Variables**: Keep credentials secure
+   ```yaml
+   koog:
+     openai:
+       apikey: "${OPENAI_API_KEY}"
+   ```
+
+2. **Configure Fallback**: Always have a fallback provider
+   ```kotlin
+   llm {
+       openAI(apiKey = primaryKey)
+       fallback {
+           provider = LLMProvider.Ollama
+           model = OllamaModels.Meta.LLAMA_3_2
+       }
+   }
+   ```
+
+3. **Handle Errors**: Use try-catch for agent calls
+   ```kotlin
+   post("/chat") {
+       try {
+           val output = aiAgent(call.receive())
+           call.respond(HttpStatusCode.OK, output)
+       } catch (e: Exception) {
+           call.respond(HttpStatusCode.InternalServerError, e.message)
+       }
+   }
+   ```
+
+4. **Moderate Content**: Always validate user input
+   ```kotlin
+   val isHarmful = llm().moderate(prompt { user(input) }, moderationModel).isHarmful
+   if (isHarmful) return@post
+   ```
+
+5. **Use Coroutines**: Leverage Kotlin coroutines for concurrency
+   ```kotlin
+   post("/batch") {
+       val inputs = call.receive<List<String>>()
+       val results = inputs.map { input ->
+           async { aiAgent(input) }
+       }.awaitAll()
+       call.respond(results)
+   }
+   ```
+
+## Common Use Cases
+
+1. **REST APIs**: AI-powered API endpoints
+2. **Webhooks**: Process incoming webhooks with agents
+3. **Microservices**: Lightweight AI microservices
+4. **Real-time Chat**: WebSocket-based chat applications
+5. **Batch Processing**: Background job processing with agents
+
+## Platform Support
+
+- **JVM**: Full support (including MCP)
+- **Native**: Core features supported (no MCP)
+- **JS/Node**: Core features supported (no MCP)
+
+## Examples
+
+Run the example application:
+
+```bash
+./gradlew :examples:simple-examples:run
+```
+
+**Source**: `examples/simple-examples/src/main/kotlin/ai/koog/agents/example/ktor/`
+
+## Next Steps
+
+- Learn about [Spring Boot integration](/integrations/spring-boot) for enterprise applications
+- Explore [Model Context Protocol](/integrations/model-context-protocol) for tool integration
+- See [Agent Client Protocol](/integrations/agent-client-protocol) for bidirectional communication
+- Check out [streaming examples](/examples/streaming) for real-time responses

@@ -1,0 +1,297 @@
+---
+title: Model Context Protocol (MCP)
+description: Connect Koog agents to MCP servers for seamless tool integration
+---
+
+The Model Context Protocol (MCP) integration enables Koog agents to connect to external tools and services through a standardized protocol. MCP provides a consistent interface for exposing tools and prompts as API endpoints that agents can call.
+
+## What is MCP?
+
+The [Model Context Protocol](https://modelcontextprotocol.io) is a standardized protocol that enables AI agents to interact with external tools and services through a consistent interface. MCP works by:
+
+- Exposing tools and prompts as API endpoints
+- Defining tool schemas in JSON Schema format
+- Supporting multiple transport mechanisms (stdio, SSE)
+- Providing a marketplace of ready-to-use servers
+
+**Why use MCP?**
+
+- **Standardization**: Connect to any MCP-compliant server without custom integrations
+- **Ecosystem**: Access hundreds of pre-built servers from the [MCP Marketplace](https://mcp.so/) and [DockerHub](https://hub.docker.com/u/mcp)
+- **Flexibility**: Support for multiple transport protocols (stdio, SSE)
+- **Easy Integration**: Automatic tool registration and conversion to Koog's tool interface
+
+## Installation
+
+Add the MCP integration dependency:
+
+```kotlin gradle
+dependencies {
+    implementation("ai.koog:agents-mcp:$koogVersion")
+}
+```
+
+## Quick Start
+
+Connect to an MCP server and create an agent with its tools:
+
+```kotlin
+import ai.koog.agents.mcp.McpToolRegistryProvider
+import ai.koog.agents.core.agent.AIAgent
+
+// Start an MCP server (e.g., as a Docker container)
+val process = ProcessBuilder("docker", "run", "-i", "mcp/google-maps").start()
+
+// Create a ToolRegistry from the MCP server
+val toolRegistry = McpToolRegistryProvider.fromTransport(
+    transport = McpToolRegistryProvider.defaultStdioTransport(process)
+)
+
+// Use the tools in your agent
+val agent = AIAgent(
+    promptExecutor = executor,
+    strategy = strategy,
+    agentConfig = agentConfig,
+    toolRegistry = toolRegistry
+)
+
+agent.run("Get the elevation of Mount Everest")
+```
+
+## Transport Types
+
+MCP supports different transport mechanisms for communication:
+
+### Standard Input/Output (stdio)
+
+Use stdio transport when the MCP server runs as a separate process:
+
+```kotlin
+// Start the MCP server process
+val process = ProcessBuilder("path/to/mcp/server").start()
+
+// Create stdio transport
+val transport = McpToolRegistryProvider.defaultStdioTransport(process)
+
+// Create tool registry
+val toolRegistry = McpToolRegistryProvider.fromTransport(transport)
+```
+
+### Server-Sent Events (SSE)
+
+Use SSE transport when the MCP server runs as a web service:
+
+```kotlin
+// Create SSE transport
+val transport = McpToolRegistryProvider.defaultSseTransport("http://localhost:8931")
+
+// Or use the convenience method
+val toolRegistry = McpToolRegistryProvider.fromSseUrl("http://localhost:8931")
+```
+
+## Configuration Options
+
+### Custom Client Configuration
+
+Customize the MCP client name and version:
+
+```kotlin
+import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+
+val toolRegistry = McpToolRegistryProvider.fromTransport(
+    transport = transport,
+    serverInfo = McpServerInfo(url = "http://localhost:8931"),
+    name = "my-custom-client",
+    version = "2.0.0"
+)
+```
+
+### Using an Existing MCP Client
+
+Connect with a pre-configured MCP client:
+
+```kotlin
+import io.modelcontextprotocol.kotlin.sdk.client.Client
+
+// Create and configure your client
+val mcpClient = Client(clientInfo = Implementation("my-client", "1.0.0"))
+mcpClient.connect(transport)
+
+// Create tool registry from the client
+val toolRegistry = McpToolRegistryProvider.fromClient(
+    mcpClient = mcpClient,
+    serverInfo = McpServerInfo(url = "http://localhost:8931")
+)
+```
+
+## Examples
+
+### Google Maps Integration
+
+Connect to the [Google Maps MCP server](https://mcp.so/server/google-maps/modelcontextprotocol) for geographic data:
+
+```kotlin
+// Start the Docker container
+val process = ProcessBuilder(
+    "docker", "run", "-i",
+    "-e", "GOOGLE_MAPS_API_KEY=$googleMapsApiKey",
+    "mcp/google-maps"
+).start()
+
+// Create tool registry
+val toolRegistry = McpToolRegistryProvider.fromTransport(
+    transport = McpToolRegistryProvider.defaultStdioTransport(process)
+)
+
+// Create and run the agent
+val agent = AIAgent(
+    promptExecutor = simpleOpenAIExecutor(openAIApiToken),
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = toolRegistry,
+)
+
+agent.run("Get elevation of the JetBrains Office in Munich, Germany?")
+```
+
+**Source**: `examples/simple-examples/src/main/kotlin/ai/koog/agents/example/mcp/GoogleMapsMcpClient.kt:21`
+
+### Playwright Browser Automation
+
+Connect to the [Playwright MCP server](https://mcp.so/server/playwright-mcp/microsoft) for web automation:
+
+```kotlin
+// Start the Playwright MCP server
+val process = ProcessBuilder(
+    "npx", "@playwright/mcp@latest", "--port", "8931"
+).start()
+
+// Create tool registry using SSE
+val toolRegistry = McpToolRegistryProvider.fromTransport(
+    transport = McpToolRegistryProvider.defaultSseTransport("http://localhost:8931")
+)
+
+// Create and run the agent
+val agent = AIAgent(
+    promptExecutor = simpleOpenAIExecutor(openAIApiToken),
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = toolRegistry,
+)
+
+agent.run("Open a browser, navigate to jetbrains.com, accept cookies, click AI in toolbar")
+```
+
+### Ktor Integration
+
+Use MCP in a Ktor application:
+
+```kotlin
+import ai.koog.ktor.Koog
+import io.ktor.server.application.install
+
+fun Application.module() {
+    install(Koog) {
+        agentConfig {
+            mcp {
+                // Use SSE transport
+                sse("http://localhost:8931")
+                
+                // Or use process-based transport
+                process(yourMcpProcess)
+                
+                // Or use existing client
+                client(yourMcpClient)
+            }
+        }
+    }
+}
+```
+
+**Source**: `examples/simple-examples/src/main/kotlin/ai/koog/agents/example/ktor/KtorIntegrationExample.kt:72`
+
+## Core Components
+
+### McpToolRegistryProvider
+
+The main entry point for creating tool registries from MCP servers:
+
+- `fromTransport()`: Create registry from a transport
+- `fromSseUrl()`: Create registry from SSE URL
+- `fromClient()`: Create registry from existing MCP client
+- `defaultStdioTransport()`: Create stdio transport
+- `defaultSseTransport()`: Create SSE transport
+
+**Source**: `agents/agents-mcp/src/commonMain/kotlin/ai/koog/agents/mcp/McpToolRegistryProvider.kt:29`
+
+### McpTool
+
+Bridge between Koog's Tool interface and the MCP SDK. Automatically created when tools are retrieved from an MCP server.
+
+**Source**: `agents/agents-mcp/src/commonMain/kotlin/ai/koog/agents/mcp/McpTool.kt`
+
+### McpToolDescriptorParser
+
+Parses tool definitions from the MCP SDK to Koog's tool descriptor format. Handles JSON Schema conversion automatically.
+
+**Source**: `agents/agents-mcp/src/commonMain/kotlin/ai/koog/agents/mcp/McpToolDefinitionParser.kt`
+
+## Finding MCP Servers
+
+Discover ready-to-use MCP servers:
+
+- **[MCP Marketplace](https://mcp.so/)**: Browse hundreds of community-built servers
+- **[MCP DockerHub](https://hub.docker.com/u/mcp)**: Official Docker images
+- **Popular Servers**:
+  - Google Maps: Geographic data and mapping
+  - Playwright: Browser automation
+  - Filesystem: File operations
+  - GitHub: Repository interactions
+  - Slack: Team communication
+
+## Platform Support
+
+- **JVM**: Full support (stdio and SSE)
+- **JS**: Full support (stdio and SSE)
+- **Native**: Planned
+
+## Common Use Cases
+
+1. **Geographic Data**: Connect to mapping services for location-based features
+2. **Web Automation**: Control browsers for testing and data extraction
+3. **File Operations**: Access filesystem tools for document processing
+4. **API Integration**: Connect to external services without custom tool code
+5. **Testing**: Use mock MCP servers for unit testing
+
+## Best Practices
+
+1. **Process Management**: Always destroy MCP processes when done:
+   ```kotlin
+   try {
+       // Use MCP server
+   } finally {
+       process.destroy()
+   }
+   ```
+
+2. **Error Handling**: Handle connection failures gracefully:
+   ```kotlin
+   val toolRegistry = try {
+       McpToolRegistryProvider.fromSseUrl(url)
+   } catch (e: Exception) {
+       logger.error("Failed to connect to MCP server", e)
+       return
+   }
+   ```
+
+3. **Tool Validation**: List tools before using them:
+   ```kotlin
+   toolRegistry.tools.forEach {
+       println("Available tool: ${it.name}")
+   }
+   ```
+
+## Next Steps
+
+- Explore the [MCP Marketplace](https://mcp.so/) for available servers
+- Check out [example implementations](/examples/mcp-integration)
+- Learn about [Agent Client Protocol](/integrations/agent-client-protocol) for bidirectional communication
+- See [Spring Boot integration](/integrations/spring-boot) for enterprise applications

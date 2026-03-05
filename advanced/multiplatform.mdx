@@ -1,0 +1,437 @@
+---
+title: 'Kotlin Multiplatform Support'
+description: 'Build AI agents for JVM, JS, WasmJS, Android, and iOS platforms'
+---
+
+## Overview
+
+Koog is built with **Kotlin Multiplatform** from the ground up, enabling you to write AI agents once and deploy them across multiple platforms. The framework supports JVM, JavaScript (JS), WebAssembly (WasmJS), Android, and iOS targets.
+
+## Supported Platforms
+
+### Platform Tiers
+
+Koog follows Kotlin's [native target support tiers](https://kotlinlang.org/docs/native-target-support.html):
+
+**Tier 1 (Fully Supported)**
+- `iosSimulatorArm64` - iOS Simulator on Apple Silicon
+- `iosArm64` - iOS devices (iPhone, iPad)
+
+**Tier 2 (Supported)**
+- `androidTarget` - Android devices and emulators
+
+**Tier 3 (Community Supported)**
+- `iosX64` - iOS Simulator on Intel Macs
+
+**Cross-platform Targets**
+- `jvm` - JVM-based platforms (Java 17+)
+- `js(IR)` - JavaScript with IR compiler
+- `wasmJs` - WebAssembly for browser and Node.js
+
+## Build Configuration
+
+### Multiplatform Module Setup
+
+Koog uses convention plugins to standardize multiplatform configuration:
+
+```kotlin
+// build.gradle.kts
+plugins {
+    id("ai.kotlin.multiplatform")
+    alias(libs.plugins.kotlin.serialization)
+}
+
+kotlin {
+    jvmToolchain(17)
+    
+    sourceSets {
+        commonMain {
+            dependencies {
+                api("ai.koog:agents-core:$koogVersion")
+                api("ai.koog:prompt-executor-openai-client:$koogVersion")
+            }
+        }
+        
+        commonTest {
+            dependencies {
+                implementation(kotlin("test"))
+            }
+        }
+    }
+}
+```
+
+### Source Set Hierarchy
+
+Koog organizes code using a hierarchical source set structure:
+
+```
+commonMain
+├── jvmCommonMain (JVM + Android)
+│   ├── jvmMain
+│   └── androidMain
+└── nonJvmCommonMain (JS + WasmJS + iOS)
+    ├── jsMain
+    ├── wasmJsMain
+    └── appleMain (iOS targets)
+```
+
+## Platform-Specific Considerations
+
+### JVM Platform
+
+**Features Available:**
+- All core agent functionality
+- OpenTelemetry integration (`agents-features-opentelemetry`)
+- Redis caching (`prompt-cache-redis`)
+- All LLM provider clients
+- Spring Boot integration (`koog-spring-boot-starter`)
+- Ktor integration (`koog-ktor`)
+
+**Requirements:**
+- JDK 17 or higher
+- Kotlin 2.1.21 or higher
+
+```kotlin
+// JVM-specific configuration
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+```
+
+### Android Platform
+
+**Features Available:**
+- Core agent functionality
+- All LLM provider clients
+- File-based caching
+- Ktor HTTP client
+
+**Configuration:**
+
+```kotlin
+android {
+    compileSdk = 36
+    namespace = "com.example.myagent"
+    
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+```
+
+**Limitations:**
+- OpenTelemetry feature requires JVM (not available on Android)
+- Use OkHttp client for better Android compatibility
+
+### iOS Platform
+
+**Features Available:**
+- Core agent functionality
+- All LLM provider clients
+- In-memory and file-based caching
+- Ktor HTTP client
+
+**XCFramework Generation:**
+
+```bash
+# Enable XCFramework build
+./gradlew build -Pkoog.build.xcframework=true
+```
+
+**Swift Integration Example:**
+
+```swift
+import KoogAgents
+
+let agent = AIAgentBuilder()
+    .withPrompt("You are a helpful assistant")
+    .withModel(OpenAIModel.gpt4)
+    .build()
+
+Task {
+    let response = try await agent.execute(input: "Hello")
+    print(response)
+}
+```
+
+### JavaScript (JS) Platform
+
+**Features Available:**
+- Core agent functionality
+- All LLM provider clients
+- Browser and Node.js support
+- In-memory caching
+
+**Browser Usage:**
+
+```kotlin
+import ai.koog.agents.core.agent.AIAgent
+import kotlinx.browser.window
+
+fun main() {
+    window.onload = {
+        val agent = AIAgent("my-agent") {
+            // Configure agent
+        }
+        
+        GlobalScope.launch {
+            val result = agent.execute("Hello")
+            console.log(result)
+        }
+    }
+}
+```
+
+**Node.js Usage:**
+
+```kotlin
+import ai.koog.agents.core.agent.AIAgent
+
+fun main() {
+    runBlocking {
+        val agent = AIAgent("my-agent") {
+            // Configure agent
+        }
+        
+        val result = agent.execute("Hello")
+        println(result)
+    }
+}
+```
+
+### WebAssembly (WasmJS) Platform
+
+**Features Available:**
+- Core agent functionality
+- All LLM provider clients
+- Browser support
+- Optimized binary size
+
+**Configuration:**
+
+```kotlin
+wasmJs {
+    browser()
+    nodejs()
+    binaries.library()
+}
+```
+
+**Performance Characteristics:**
+- Faster startup than JS
+- Smaller binary size with tree shaking
+- Near-native execution speed
+- Limited third-party library support
+
+## Platform Abstractions
+
+### Expect/Actual Pattern
+
+Use Kotlin's `expect`/`actual` mechanism for platform-specific implementations:
+
+```kotlin
+// commonMain/Platform.kt
+expect fun getPlatform(): Platform
+
+interface Platform {
+    val name: String
+}
+
+// jvmMain/Platform.kt
+actual fun getPlatform(): Platform = JvmPlatform()
+
+class JvmPlatform : Platform {
+    override val name: String = "JVM ${System.getProperty("java.version")}"
+}
+
+// jsMain/Platform.kt
+actual fun getPlatform(): Platform = JsPlatform()
+
+class JsPlatform : Platform {
+    override val name: String = "JavaScript"
+}
+```
+
+### HTTP Client Selection
+
+Koog provides multiple HTTP client implementations:
+
+```kotlin
+// JVM: Use OkHttp (recommended)
+dependencies {
+    implementation("ai.koog:http-client-okhttp:$version")
+}
+
+// JVM: Use Java HTTP Client
+dependencies {
+    implementation("ai.koog:http-client-java:$version")
+}
+
+// Multiplatform: Use Ktor (all platforms)
+dependencies {
+    implementation("ai.koog:http-client-ktor:$version")
+}
+```
+
+## Feature Availability Matrix
+
+| Feature | JVM | Android | iOS | JS | WasmJS |
+|---------|-----|---------|-----|----|---------|
+| Core Agents | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Graph Strategies | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Tool Execution | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Memory Features | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Tracing | ✅ | ✅ | ✅ | ✅ | ✅ |
+| OpenTelemetry | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Redis Cache | ✅ | ❌ | ❌ | ❌ | ❌ |
+| File Cache | ✅ | ✅ | ✅ | ❌ | ❌ |
+| In-Memory Cache | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Spring Boot | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Ktor | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+## Testing Across Platforms
+
+### Run Tests on All Platforms
+
+```bash
+# All JVM tests
+./gradlew jvmTest
+
+# All JS tests
+./gradlew jsTest
+
+# All Wasm tests
+./gradlew wasmJsTest
+
+# iOS simulator tests
+./gradlew iosSimulatorArm64Test
+
+# All tests on all platforms
+./gradlew allTests
+```
+
+### Platform-Specific Tests
+
+```kotlin
+// commonTest/AgentTest.kt
+class AgentTest {
+    @Test
+    fun testBasicExecution() = runTest {
+        val agent = AIAgent("test") { /* ... */ }
+        val result = agent.execute("input")
+        assertNotNull(result)
+    }
+}
+
+// jvmTest/AgentJvmTest.kt
+class AgentJvmTest {
+    @Test
+    fun testOpenTelemetry() {
+        val agent = AIAgent("test") {
+            install(OpenTelemetry) { /* JVM only */ }
+        }
+    }
+}
+```
+
+## Best Practices
+
+### 1. Use Common Code First
+
+Maximize code sharing by implementing in `commonMain`:
+
+```kotlin
+// ✅ Good: Common implementation
+class MyAgent(private val config: Config) {
+    suspend fun execute(input: String): String {
+        // Works on all platforms
+        return llm.complete(input)
+    }
+}
+```
+
+### 2. Platform-Specific Only When Needed
+
+Use platform-specific code only for unavoidable differences:
+
+```kotlin
+// ❌ Avoid: Unnecessary platform-specific code
+expect fun formatDate(timestamp: Long): String
+
+// ✅ Better: Use kotlinx-datetime (multiplatform)
+import kotlinx.datetime.Instant
+fun formatDate(timestamp: Long): String {
+    return Instant.fromEpochMilliseconds(timestamp).toString()
+}
+```
+
+### 3. Test on Target Platforms
+
+Always test on your deployment targets:
+
+```bash
+# Before deploying to iOS
+./gradlew iosSimulatorArm64Test
+
+# Before deploying to browser
+./gradlew jsBrowserTest
+```
+
+### 4. Handle Platform Capabilities
+
+```kotlin
+// Gracefully handle platform limitations
+val cache = when {
+    isJvm() -> RedisPromptCache(redis)
+    supportsFileSystem() -> FilePromptCache(path)
+    else -> InMemoryPromptCache()
+}
+```
+
+## Migration Guide
+
+### Adding iOS Support to Existing Project
+
+```kotlin
+// 1. Add iOS targets to build.gradle.kts
+kotlin {
+    iosSimulatorArm64()
+    iosArm64()
+    iosX64()
+}
+
+// 2. Move platform-specific code
+// Move: src/main/kotlin → src/jvmMain/kotlin
+// Keep: Common code in src/commonMain/kotlin
+
+// 3. Test compilation
+./gradlew compileKotlinIosArm64
+```
+
+### Converting JVM-Only Dependencies
+
+```kotlin
+// Before: JVM-only dependency
+dependencies {
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+}
+
+// After: Multiplatform alternative
+dependencies {
+    implementation("io.ktor:ktor-client-core:2.3.0")
+    implementation("io.ktor:ktor-client-okhttp:2.3.0") // JVM
+    implementation("io.ktor:ktor-client-darwin:2.3.0") // iOS
+    implementation("io.ktor:ktor-client-js:2.3.0")     // JS
+}
+```
+
+## Resources
+
+- [Kotlin Multiplatform Documentation](https://kotlinlang.org/docs/multiplatform.html)
+- [Koog Platform Examples](/examples/platforms)
+- [HTTP Client Selection Guide](/integrations/http-clients)
+- [Target Platform Support](https://kotlinlang.org/docs/native-target-support.html)

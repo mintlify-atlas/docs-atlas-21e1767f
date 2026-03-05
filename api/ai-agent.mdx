@@ -1,0 +1,279 @@
+---
+title: AIAgent
+description: Core interface for building and executing AI agents with graph-based workflows
+---
+
+## Overview
+
+`AIAgent` is the main orchestrator for executing AI agent workflows. It manages strategies, tools, features, and LLM communication through a flexible, extensible architecture.
+
+<Note>
+  AIAgent is an `expect` class with platform-specific implementations for JVM, JS, and other Kotlin multiplatform targets.
+</Note>
+
+## Class Definition
+
+```kotlin
+public expect abstract class AIAgent<Input, Output> : Closeable
+```
+
+### Type Parameters
+
+<ParamField path="Input" type="Generic">
+  The type of input the AI agent will process
+</ParamField>
+
+<ParamField path="Output" type="Generic">
+  The type of output the AI agent will produce
+</ParamField>
+
+## Properties
+
+<ResponseField name="id" type="String" required>
+  Unique identifier for the AI agent instance
+</ResponseField>
+
+<ResponseField name="agentConfig" type="AIAgentConfig" required>
+  The configuration for the AI agent, including prompt setup, model settings, and iteration limits
+</ResponseField>
+
+## Methods
+
+### run
+
+Executes the AI agent with the given input and retrieves the resulting output.
+
+```kotlin
+public abstract suspend fun run(
+    agentInput: Input,
+    sessionId: String? = null
+): Output
+```
+
+<ParamField path="agentInput" type="Input" required>
+  The input for the agent to process
+</ParamField>
+
+<ParamField path="sessionId" type="String?">
+  Optional session identifier for tracking execution
+</ParamField>
+
+<ResponseField name="return" type="Output">
+  The output produced by the agent after processing the input
+</ResponseField>
+
+### createSession
+
+Creates a new session for executing the agent with custom lifecycle management.
+
+```kotlin
+public abstract fun createSession(
+    sessionId: String? = null
+): AIAgentRunSession<Input, Output, out AIAgentContext>
+```
+
+<ParamField path="sessionId" type="String?">
+  Optional session identifier
+</ParamField>
+
+<ResponseField name="return" type="AIAgentRunSession<Input, Output, out AIAgentContext>">
+  A session instance for independent agent execution with state tracking
+</ResponseField>
+
+## Factory Methods
+
+### Graph-based Agent
+
+Create an agent with a graph-based execution strategy:
+
+```kotlin
+public inline operator fun <reified Input, reified Output> invoke(
+    promptExecutor: PromptExecutor,
+    agentConfig: AIAgentConfig,
+    strategy: AIAgentGraphStrategy<Input, Output>,
+    toolRegistry: ToolRegistry = ToolRegistry.EMPTY,
+    id: String? = null,
+    clock: Clock = Clock.System,
+    noinline installFeatures: FeatureContext.() -> Unit = {}
+): AIAgent<Input, Output>
+```
+
+<ParamField path="promptExecutor" type="PromptExecutor" required>
+  Executor responsible for processing prompts and interacting with the language model
+</ParamField>
+
+<ParamField path="agentConfig" type="AIAgentConfig" required>
+  Configuration for the AI agent
+</ParamField>
+
+<ParamField path="strategy" type="AIAgentGraphStrategy<Input, Output>" required>
+  The strategy for executing the agent's graph logic
+</ParamField>
+
+<ParamField path="toolRegistry" type="ToolRegistry" default="ToolRegistry.EMPTY">
+  Registry of tools available for use by the agent
+</ParamField>
+
+<ParamField path="id" type="String?" default="null">
+  Unique identifier for the agent. Random UUID will be generated if null
+</ParamField>
+
+<ParamField path="clock" type="Clock" default="Clock.System">
+  Clock instance for time-related operations
+</ParamField>
+
+<ParamField path="installFeatures" type="FeatureContext.() -> Unit" default="{}">
+  Lambda expression to install additional features in the agent's feature context
+</ParamField>
+
+### Functional Agent
+
+Create an agent with a functional execution strategy:
+
+```kotlin
+public operator fun <Input, Output> invoke(
+    promptExecutor: PromptExecutor,
+    agentConfig: AIAgentConfig,
+    strategy: AIAgentFunctionalStrategy<Input, Output>,
+    toolRegistry: ToolRegistry = ToolRegistry.EMPTY,
+    id: String? = null,
+    clock: Clock = Clock.System,
+    installFeatures: FunctionalAIAgent.FeatureContext.() -> Unit = {}
+): FunctionalAIAgent<Input, Output>
+```
+
+### Quick Configuration
+
+Create an agent with model and processor directly:
+
+```kotlin
+public operator fun invoke(
+    promptExecutor: PromptExecutor,
+    llmModel: LLModel,
+    responseProcessor: ResponseProcessor? = null,
+    strategy: AIAgentGraphStrategy<String, String> = singleRunStrategy(),
+    toolRegistry: ToolRegistry = ToolRegistry.EMPTY,
+    id: String? = null,
+    systemPrompt: String? = null,
+    temperature: Double? = null,
+    numberOfChoices: Int = 1,
+    maxIterations: Int = 50,
+    installFeatures: FeatureContext.() -> Unit = {}
+): AIAgent<String, String>
+```
+
+<ParamField path="llmModel" type="LLModel" required>
+  The specific large language model to be used
+</ParamField>
+
+<ParamField path="responseProcessor" type="ResponseProcessor?">
+  Processor for handling the model's responses
+</ParamField>
+
+<ParamField path="systemPrompt" type="String?">
+  Optional system prompt for the agent
+</ParamField>
+
+<ParamField path="temperature" type="Double?">
+  Model temperature, typically ranging from 0.0 to 1.0
+</ParamField>
+
+<ParamField path="numberOfChoices" type="Int" default="1">
+  Number of response choices to generate
+</ParamField>
+
+<ParamField path="maxIterations" type="Int" default="50">
+  Maximum number of iterations the agent is allowed to perform
+</ParamField>
+
+### Builder Pattern
+
+Get a builder for fluent agent configuration:
+
+```kotlin
+public fun builder(): AIAgentBuilder
+```
+
+## Usage Examples
+
+### Basic Graph Agent
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = executor,
+    agentConfig = AIAgentConfig(
+        prompt = Prompt { },
+        llm = llmModel,
+        maxIterations = 10
+    ),
+    strategy = singleRunStrategy(),
+    toolRegistry = ToolRegistry {
+        tool(MyTool())
+    }
+)
+
+val result = agent.run("Analyze this data")
+println(result)
+
+agent.close()
+```
+
+### Agent with Features
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = executor,
+    agentConfig = config,
+    strategy = myStrategy,
+    toolRegistry = myTools
+) {
+    // Install features
+    install(TracingFeature) {
+        writer = TraceFeatureMessageLogWriter()
+    }
+    
+    install(MemoryFeature) {
+        maxMessages = 100
+    }
+}
+```
+
+### Using Builder
+
+```kotlin
+val agent = AIAgent.builder()
+    .promptExecutor(executor)
+    .model(llmModel)
+    .strategy(customStrategy)
+    .tools {
+        tool(SearchTool())
+        tool(CalculatorTool())
+    }
+    .systemPrompt("You are a helpful assistant")
+    .temperature(0.7)
+    .maxIterations(20)
+    .build()
+```
+
+### Session Management
+
+```kotlin
+val session = agent.createSession("session-123")
+try {
+    val result = session.run(input)
+    println("Result: $result")
+} finally {
+    session.close()
+}
+```
+
+## Related Types
+
+- [AIAgentStrategy](/api/ai-agent-strategy) - Defines agent execution logic
+- [AIAgentEnvironment](/api/ai-agent-environment) - Tool execution context
+- [ToolRegistry](/api/tool-registry) - Tool management
+- [AIAgentFeature](/api/ai-agent-feature) - Extensible capabilities
+
+## Source Reference
+
+Defined in: `agents-core/src/commonMain/kotlin/ai/koog/agents/core/agent/AIAgent.kt`

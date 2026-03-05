@@ -1,0 +1,393 @@
+---
+title: OpenAI Provider
+description: Use OpenAI's GPT models including GPT-4o, GPT-5, and o-series reasoning models
+---
+
+OpenAI provides industry-leading language models through their API. Koog supports all OpenAI models including GPT-4o, GPT-5, o-series reasoning models, and audio-enabled models.
+
+## Installation
+
+The OpenAI client is included in the core Koog library. No additional dependencies required.
+
+## Quick Start
+
+```kotlin
+import ai.koog.prompt.executor.clients.openai.*
+import ai.koog.agents.core.*
+
+val executor = simpleOpenAIExecutor(
+    apiKey = System.getenv("OPENAI_API_KEY"),
+    model = OpenAIModels.Chat.GPT4o
+)
+
+val agent = AIAgent(
+    executor = executor,
+    tools = toolRegistry {
+        // Your tools here
+    }
+) {
+    // Define your agent strategy
+}
+
+val result = agent.execute("Analyze this data...")
+```
+
+## Authentication
+
+### API Key Setup
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+### Programmatic Configuration
+
+```kotlin
+val client = OpenAILLMClient(
+    apiKey = "sk-...",
+    settings = OpenAIClientSettings(
+        baseUrl = "https://api.openai.com",
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 120_000,
+            connectTimeoutMillis = 30_000
+        )
+    )
+)
+```
+
+## Available Models
+
+### GPT-4o Series (Recommended)
+
+Best all-around models with multimodal capabilities.
+
+```kotlin
+OpenAIModels.Chat.GPT4o          // 128K context, vision, tools
+OpenAIModels.Chat.GPT4oMini      // Faster, cheaper variant
+```
+
+**Capabilities:**
+- Text generation
+- Vision (images and PDFs)
+- Function calling
+- Structured outputs
+- Multimodal inputs
+
+### GPT-5 Series (Latest)
+
+Next-generation models with enhanced reasoning.
+
+```kotlin
+OpenAIModels.Chat.GPT5           // 400K context, most capable
+OpenAIModels.Chat.GPT5Mini       // Faster, cost-effective
+OpenAIModels.Chat.GPT5Nano       // Ultra-fast, budget-friendly
+OpenAIModels.Chat.GPT5Codex      // Optimized for code (Responses API only)
+OpenAIModels.Chat.GPT5Pro        // Most advanced reasoning
+```
+
+### o-Series (Reasoning Models)
+
+Models with extended thinking capability.
+
+```kotlin
+OpenAIModels.Chat.O1             // Strong reasoning, 200K context
+OpenAIModels.Chat.O3             // Balanced reasoning model
+OpenAIModels.Chat.O3Mini         // Faster reasoning
+OpenAIModels.Chat.O4Mini         // Vision + reasoning
+```
+
+**Use cases:**
+- Complex problem solving
+- Mathematical reasoning
+- Code generation and debugging
+- Multi-step analysis
+
+### Audio Models
+
+Models with audio input/output capabilities.
+
+```kotlin
+OpenAIModels.Audio.GptAudio      // Audio I/O
+OpenAIModels.Audio.GPT4oAudio    // GPT-4o with audio
+```
+
+### Embedding Models
+
+```kotlin
+OpenAIModels.Embeddings.TextEmbedding3Small  // 1536 dims, fast
+OpenAIModels.Embeddings.TextEmbedding3Large  // 3072 dims, best quality
+```
+
+### Moderation
+
+```kotlin
+OpenAIModels.Moderation.Omni     // Text + image moderation
+```
+
+## Code Examples
+
+### Basic Chat Completion
+
+```kotlin
+val executor = simpleOpenAIExecutor(
+    apiKey = System.getenv("OPENAI_API_KEY"),
+    model = OpenAIModels.Chat.GPT4o
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user("What is the capital of France?")
+    }
+)
+
+println(result.first().content) // "Paris is the capital of France."
+```
+
+### Function Calling
+
+```kotlin
+data class WeatherArgs(val location: String, val unit: String = "celsius")
+
+val weatherTool = tool<WeatherArgs, String>(
+    name = "get_weather",
+    description = "Get current weather for a location"
+) { args ->
+    "Sunny, 22°C in ${args.location}"
+}
+
+val agent = AIAgent(
+    executor = simpleOpenAIExecutor(
+        apiKey = System.getenv("OPENAI_API_KEY"),
+        model = OpenAIModels.Chat.GPT4o
+    ),
+    tools = toolRegistry { tool(weatherTool) }
+) {
+    defineGraph<String, String>("weather-agent") {
+        val response = callLLM()
+        finish(response)
+    }
+}
+
+val result = agent.execute("What's the weather in Paris?")
+```
+
+### Structured Output
+
+```kotlin
+@Serializable
+data class Person(
+    val name: String,
+    val age: Int,
+    val email: String
+)
+
+val executor = simpleOpenAIExecutor(
+    apiKey = System.getenv("OPENAI_API_KEY"),
+    model = OpenAIModels.Chat.GPT4o,
+    params = OpenAIChatParams(
+        schema = LLMParams.Schema.JSON.Standard(
+            name = "Person",
+            schema = /* JSON schema for Person */
+        )
+    )
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user("Extract person info: John Doe, 30 years old, john@example.com")
+    }
+)
+
+val person = Json.decodeFromString<Person>(result.first().content)
+```
+
+### Vision (Image Analysis)
+
+```kotlin
+val executor = simpleOpenAIExecutor(
+    apiKey = System.getenv("OPENAI_API_KEY"),
+    model = OpenAIModels.Chat.GPT4o
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user {
+            text("What's in this image?")
+            image(
+                url = "https://example.com/image.jpg"
+                // or: bytes = imageBytes
+            )
+        }
+    }
+)
+```
+
+### Streaming Responses
+
+```kotlin
+val executor = simpleOpenAIExecutor(
+    apiKey = System.getenv("OPENAI_API_KEY"),
+    model = OpenAIModels.Chat.GPT4o
+)
+
+executor.executeStreaming(
+    prompt = prompt { user("Write a story about AI") }
+).collect { frame ->
+    when (frame) {
+        is StreamFrame.TextDelta -> print(frame.text)
+        is StreamFrame.End -> println("\nDone!")
+        else -> {}
+    }
+}
+```
+
+### Embeddings
+
+```kotlin
+val client = OpenAILLMClient(
+    apiKey = System.getenv("OPENAI_API_KEY")
+)
+
+val embedding = client.embed(
+    text = "The quick brown fox jumps over the lazy dog",
+    model = OpenAIModels.Embeddings.TextEmbedding3Small
+)
+
+println("Embedding dimensions: ${embedding.size}") // 1536
+```
+
+### Content Moderation
+
+```kotlin
+val client = OpenAILLMClient(
+    apiKey = System.getenv("OPENAI_API_KEY")
+)
+
+val result = client.moderate(
+    prompt = prompt { user("Some potentially harmful content") },
+    model = OpenAIModels.Moderation.Omni
+)
+
+if (result.isHarmful) {
+    println("Content flagged: ${result.categories}")
+}
+```
+
+## Advanced Configuration
+
+### Custom Parameters
+
+```kotlin
+val executor = simpleOpenAIExecutor(
+    apiKey = System.getenv("OPENAI_API_KEY"),
+    model = OpenAIModels.Chat.GPT4o,
+    params = OpenAIChatParams(
+        temperature = 0.7,
+        maxTokens = 2000,
+        topP = 0.9,
+        frequencyPenalty = 0.5,
+        presencePenalty = 0.5,
+        stop = listOf("\n\n"),
+        user = "user-123" // For abuse monitoring
+    )
+)
+```
+
+### Responses API
+
+For models that support the Responses API (GPT-5 Codex, GPT-5 Pro):
+
+```kotlin
+val executor = simpleOpenAIExecutor(
+    apiKey = System.getenv("OPENAI_API_KEY"),
+    model = OpenAIModels.Chat.GPT5Codex,
+    params = OpenAIResponsesParams(
+        maxTokens = 4000,
+        reasoning = OpenAIResponsesParams.Reasoning(
+            effort = "high"
+        )
+    )
+)
+```
+
+### Azure OpenAI
+
+```kotlin
+val client = OpenAILLMClient(
+    apiKey = System.getenv("AZURE_OPENAI_KEY"),
+    settings = OpenAIClientSettings(
+        baseUrl = "https://YOUR-RESOURCE.openai.azure.com",
+        chatCompletionsPath = "openai/deployments/YOUR-DEPLOYMENT/chat/completions"
+    )
+)
+```
+
+## Model Capabilities
+
+| Model | Context | Output | Vision | Audio | Tools | Reasoning |
+|-------|---------|--------|--------|-------|-------|----------|
+| GPT-4o | 128K | 16K | ✅ | ❌ | ✅ | ❌ |
+| GPT-4o Mini | 128K | 16K | ✅ | ❌ | ✅ | ❌ |
+| GPT-5 | 400K | 128K | ✅ | ❌ | ✅ | ✅ |
+| GPT-5 Pro | 400K | 272K | ✅ | ❌ | ✅ | ✅ |
+| O3 | 200K | 100K | ✅ | ❌ | ✅ | ✅ |
+| GPT Audio | 128K | 16K | ❌ | ✅ | ✅ | ❌ |
+
+## Pricing
+
+Pricing varies by model. See [OpenAI Pricing](https://openai.com/pricing) for current rates.
+
+**Example costs (per 1M tokens):**
+- GPT-4o: $2.50 (input) / $10 (output)
+- GPT-4o Mini: $0.15 (input) / $0.60 (output)
+- GPT-5: $1.25 (input) / $10 (output)
+- O3: $15 (input) / $60 (output)
+
+## Best Practices
+
+1. **Use GPT-4o Mini** for most tasks - it's fast and cost-effective
+2. **Reserve GPT-5/O3** for complex reasoning tasks
+3. **Enable streaming** for better user experience
+4. **Set max_tokens** to control costs
+5. **Use structured outputs** for reliable parsing
+6. **Implement retries** for production reliability
+
+## Troubleshooting
+
+### Rate Limits
+
+```kotlin
+val client = OpenAILLMClient(
+    apiKey = System.getenv("OPENAI_API_KEY"),
+    settings = OpenAIClientSettings(
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 180_000 // 3 minutes
+        )
+    )
+)
+```
+
+### Error Handling
+
+```kotlin
+try {
+    val result = executor.execute(prompt { user("Hello") })
+} catch (e: LLMClientException) {
+    when {
+        e.message?.contains("rate_limit") == true -> {
+            // Handle rate limiting
+        }
+        e.message?.contains("insufficient_quota") == true -> {
+            // Handle quota issues
+        }
+        else -> throw e
+    }
+}
+```
+
+## Resources
+
+- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [Model Pricing](https://openai.com/pricing)
+- [API Reference](/api-reference/llm-providers/openai)
+- [Examples Repository](https://github.com/koog-ai/examples)

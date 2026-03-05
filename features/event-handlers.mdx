@@ -1,0 +1,522 @@
+---
+title: Event Handlers
+description: Hook into agent lifecycle events for custom logic and monitoring
+---
+
+The Event Handler feature allows you to register callbacks for various events that occur during agent execution, enabling custom monitoring, logging, debugging, and integration with external systems.
+
+## What are Event Handlers?
+
+Event Handlers provide hooks into the agent's lifecycle, letting you react to:
+
+- **Agent events**: Agent starting, completion, errors, and closing
+- **Strategy events**: Strategy execution start and completion
+- **Node events**: Individual node execution lifecycle
+- **LLM events**: LLM calls and streaming responses
+- **Tool events**: Tool calls, validation, and results
+- **Subgraph events**: Subgraph execution in complex strategies
+
+## Installation
+
+```kotlin
+import ai.koog.agents.features.eventHandler.feature.EventHandler
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+
+val agent = AIAgent(
+    executor = myExecutor,
+    strategy = myStrategy
+) {
+    handleEvents {
+        onToolCallStarting { ctx ->
+            println("Tool called: ${ctx.toolName} with args: ${ctx.toolArgs}")
+        }
+        
+        onAgentCompleted { ctx ->
+            println("Agent finished with result: ${ctx.result}")
+        }
+        
+        onAgentExecutionFailed { ctx ->
+            logger.error("Agent failed: ${ctx.throwable.message}")
+        }
+    }
+}
+```
+
+## Available Event Handlers
+
+### Agent Lifecycle Events
+
+```kotlin
+handleEvents {
+    // Called when agent starts executing
+    onAgentStarting { ctx ->
+        println("Agent ${ctx.agent.id} starting run ${ctx.runId}")
+    }
+    
+    // Called when agent completes successfully
+    onAgentCompleted { ctx ->
+        println("Agent completed with result: ${ctx.result}")
+        println("Run ID: ${ctx.runId}")
+    }
+    
+    // Called when agent execution fails
+    onAgentExecutionFailed { ctx ->
+        logger.error("Agent failed", ctx.throwable)
+        // Send alert, save error state, etc.
+    }
+    
+    // Called before agent closes
+    onAgentClosing { ctx ->
+        println("Agent ${ctx.agentId} closing")
+        // Cleanup resources
+    }
+}
+```
+
+#### Agent Event Context Properties
+
+| Event | Context Properties |
+|-------|-------------------|
+| `onAgentStarting` | `agent`, `runId`, `eventId`, `executionInfo` |
+| `onAgentCompleted` | `agentId`, `runId`, `result`, `eventId` |
+| `onAgentExecutionFailed` | `agentId`, `runId`, `throwable`, `eventId` |
+| `onAgentClosing` | `agentId`, `eventId` |
+
+### Strategy Events
+
+```kotlin
+handleEvents {
+    // Called when strategy starts executing
+    onStrategyStarting { ctx ->
+        println("Strategy ${ctx.strategy.name} starting")
+        println("Context: ${ctx.context}")
+    }
+    
+    // Called when strategy completes
+    onStrategyCompleted { ctx ->
+        println("Strategy ${ctx.strategy.name} completed")
+        println("Result: ${ctx.result}")
+    }
+}
+```
+
+### Node Execution Events
+
+```kotlin
+handleEvents {
+    // Called before node execution
+    onNodeExecutionStarting { ctx ->
+        println("Executing node: ${ctx.node.name}")
+        println("Input: ${ctx.input}")
+    }
+    
+    // Called after node completes successfully
+    onNodeExecutionCompleted { ctx ->
+        println("Node ${ctx.node.name} completed")
+        println("Input: ${ctx.input}")
+        println("Output: ${ctx.output}")
+    }
+    
+    // Called when node execution fails
+    onNodeExecutionFailed { ctx ->
+        logger.error("Node ${ctx.node.name} failed", ctx.throwable)
+    }
+}
+```
+
+### Subgraph Events
+
+```kotlin
+handleEvents {
+    // Called when subgraph starts
+    onSubgraphExecutionStarting { ctx ->
+        println("Subgraph ${ctx.subgraph.name} starting")
+        println("Input: ${ctx.input}")
+    }
+    
+    // Called when subgraph completes
+    onSubgraphExecutionCompleted { ctx ->
+        println("Subgraph ${ctx.subgraph.name} completed")
+        println("Output: ${ctx.output}")
+    }
+    
+    // Called when subgraph fails
+    onSubgraphExecutionFailed { ctx ->
+        logger.error("Subgraph failed", ctx.throwable)
+    }
+}
+```
+
+### LLM Call Events
+
+```kotlin
+handleEvents {
+    // Called before LLM is invoked
+    onLLMCallStarting { ctx ->
+        println("Calling LLM with model: ${ctx.model.id}")
+        println("Prompt messages: ${ctx.prompt.messages.size}")
+        println("Available tools: ${ctx.tools.map { it.name }}")
+    }
+    
+    // Called after LLM responds
+    onLLMCallCompleted { ctx ->
+        println("LLM responded")
+        println("Responses: ${ctx.responses.size}")
+        ctx.moderationResponse?.let {
+            println("Moderation: $it")
+        }
+    }
+}
+```
+
+### LLM Streaming Events
+
+```kotlin
+handleEvents {
+    // Called when streaming starts
+    onLLMStreamingStarting { ctx ->
+        println("Starting LLM stream with model: ${ctx.model.id}")
+    }
+    
+    // Called for each streaming frame
+    onLLMStreamingFrameReceived { ctx ->
+        print(ctx.streamFrame.content) // Print streaming output
+    }
+    
+    // Called when streaming completes
+    onLLMStreamingCompleted { ctx ->
+        println("\nStreaming completed")
+    }
+    
+    // Called when streaming fails
+    onLLMStreamingFailed { ctx ->
+        logger.error("Streaming failed", ctx.error)
+    }
+}
+```
+
+### Tool Call Events
+
+```kotlin
+handleEvents {
+    // Called when tool is about to execute
+    onToolCallStarting { ctx ->
+        println("Tool: ${ctx.toolName}")
+        println("Args: ${ctx.toolArgs}")
+        println("Call ID: ${ctx.toolCallId}")
+    }
+    
+    // Called when tool validation fails
+    onToolValidationFailed { ctx ->
+        logger.warn("Tool validation failed: ${ctx.toolName}")
+        logger.warn("Error: ${ctx.error}")
+        logger.warn("Message: ${ctx.message}")
+    }
+    
+    // Called when tool execution fails
+    onToolCallFailed { ctx ->
+        logger.error("Tool ${ctx.toolName} failed", ctx.error)
+    }
+    
+    // Called when tool completes successfully
+    onToolCallCompleted { ctx ->
+        println("Tool ${ctx.toolName} completed")
+        println("Result: ${ctx.result}")
+    }
+}
+```
+
+## Use Cases
+
+### Logging and Debugging
+
+```kotlin
+import io.github.oshai.kotlinlogging.KotlinLogging
+
+val logger = KotlinLogging.logger {}
+
+handleEvents {
+    onNodeExecutionStarting { ctx ->
+        logger.info { "[${ctx.node.name}] Starting with input: ${ctx.input}" }
+    }
+    
+    onNodeExecutionCompleted { ctx ->
+        logger.info { "[${ctx.node.name}] Completed with output: ${ctx.output}" }
+    }
+    
+    onNodeExecutionFailed { ctx ->
+        logger.error(ctx.throwable) { "[${ctx.node.name}] Failed" }
+    }
+}
+```
+
+### Performance Monitoring
+
+```kotlin
+import kotlin.time.measureTime
+
+val metrics = mutableMapOf<String, Long>()
+
+handleEvents {
+    val nodeStartTimes = mutableMapOf<String, Long>()
+    
+    onNodeExecutionStarting { ctx ->
+        nodeStartTimes[ctx.node.name] = System.currentTimeMillis()
+    }
+    
+    onNodeExecutionCompleted { ctx ->
+        val startTime = nodeStartTimes[ctx.node.name] ?: return@onNodeExecutionCompleted
+        val duration = System.currentTimeMillis() - startTime
+        
+        metrics[ctx.node.name] = duration
+        println("Node ${ctx.node.name} took ${duration}ms")
+    }
+    
+    onAgentCompleted { ctx ->
+        println("\nPerformance Summary:")
+        metrics.forEach { (name, duration) ->
+            println("  $name: ${duration}ms")
+        }
+    }
+}
+```
+
+### Cost Tracking
+
+```kotlin
+data class UsageStats(
+    var totalTokens: Int = 0,
+    var llmCalls: Int = 0,
+    var toolCalls: Int = 0
+)
+
+val stats = UsageStats()
+
+handleEvents {
+    onLLMCallCompleted { ctx ->
+        stats.llmCalls++
+        // Extract token usage from response metadata if available
+        ctx.responses.firstOrNull()?.let { response ->
+            // Parse token count from response
+            stats.totalTokens += extractTokenCount(response)
+        }
+    }
+    
+    onToolCallCompleted { ctx ->
+        stats.toolCalls++
+    }
+    
+    onAgentCompleted { ctx ->
+        println("""
+            Usage Summary:
+            - LLM Calls: ${stats.llmCalls}
+            - Tool Calls: ${stats.toolCalls}
+            - Total Tokens: ${stats.totalTokens}
+            - Estimated Cost: $${estimateCost(stats.totalTokens)}
+        """.trimIndent())
+    }
+}
+```
+
+### Integration with External Systems
+
+```kotlin
+handleEvents {
+    onAgentStarting { ctx ->
+        // Send to monitoring system
+        prometheusMetrics.incrementCounter("agent_runs_total")
+        datadogClient.startTrace(ctx.runId)
+    }
+    
+    onToolCallCompleted { ctx ->
+        // Log to external service
+        analyticsService.trackEvent(
+            event = "tool_call",
+            properties = mapOf(
+                "tool" to ctx.toolName,
+                "success" to true,
+                "runId" to ctx.runId
+            )
+        )
+    }
+    
+    onAgentExecutionFailed { ctx ->
+        // Send alert
+        slackClient.sendAlert(
+            channel = "#agent-errors",
+            message = "Agent failed: ${ctx.throwable.message}",
+            context = mapOf(
+                "agentId" to ctx.agentId,
+                "runId" to ctx.runId
+            )
+        )
+    }
+}
+```
+
+### Progress Tracking
+
+```kotlin
+handleEvents {
+    var totalNodes = 0
+    var completedNodes = 0
+    
+    onStrategyStarting { ctx ->
+        // Reset counters
+        totalNodes = estimateTotalNodes(ctx.strategy)
+        completedNodes = 0
+        println("Starting strategy with ~$totalNodes nodes")
+    }
+    
+    onNodeExecutionCompleted { ctx ->
+        completedNodes++
+        val progress = (completedNodes.toDouble() / totalNodes * 100).toInt()
+        println("Progress: $progress% ($completedNodes/$totalNodes)")
+    }
+}
+```
+
+### State Persistence
+
+```kotlin
+handleEvents {
+    onNodeExecutionCompleted { ctx ->
+        // Save intermediate results
+        stateStore.save(
+            key = "${ctx.context.runId}:${ctx.node.name}",
+            value = ctx.output
+        )
+    }
+    
+    onAgentExecutionFailed { ctx ->
+        // Save failure state for recovery
+        failureStore.save(
+            runId = ctx.runId,
+            error = ctx.throwable,
+            timestamp = System.currentTimeMillis()
+        )
+    }
+}
+```
+
+## Complete Example
+
+```kotlin
+import ai.koog.agents.core.dsl.graphStrategy
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+import io.github.oshai.kotlinlogging.KotlinLogging
+
+val logger = KotlinLogging.logger {}
+val metrics = mutableMapOf<String, Any>()
+
+val agent = AIAgent(
+    executor = openAIExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = graphStrategy {
+        val analyzeCode by node<String, String> { code ->
+            requestLLM("Analyze this code: $code")
+        }
+        
+        val generateReport by node<String, String> { analysis ->
+            "Report: $analysis"
+        }
+        
+        edges {
+            start goesTo analyzeCode
+            analyzeCode goesTo generateReport
+            generateReport goesTo finish
+        }
+    }
+) {
+    handleEvents {
+        // Log agent lifecycle
+        onAgentStarting { ctx ->
+            logger.info { "Starting agent run ${ctx.runId}" }
+            metrics["startTime"] = System.currentTimeMillis()
+        }
+        
+        // Track node execution
+        onNodeExecutionCompleted { ctx ->
+            logger.info { "${ctx.node.name}: ${ctx.input} -> ${ctx.output}" }
+        }
+        
+        // Monitor LLM calls
+        onLLMCallStarting { ctx ->
+            logger.debug { "LLM call with ${ctx.prompt.messages.size} messages" }
+        }
+        
+        // Track tool usage
+        onToolCallCompleted { ctx ->
+            logger.info { "Tool ${ctx.toolName} returned: ${ctx.result}" }
+        }
+        
+        // Handle errors
+        onAgentExecutionFailed { ctx ->
+            logger.error(ctx.throwable) { "Agent failed in run ${ctx.runId}" }
+        }
+        
+        // Report completion
+        onAgentCompleted { ctx ->
+            val duration = System.currentTimeMillis() - (metrics["startTime"] as Long)
+            logger.info { "Agent completed in ${duration}ms" }
+            logger.info { "Result: ${ctx.result}" }
+        }
+    }
+}
+
+val result = agent.run("fun main() { println(\"Hello\") }")
+```
+
+## Event Context Interface
+
+All event contexts extend common interfaces:
+
+```kotlin
+interface EventContext {
+    val eventId: String        // Unique event identifier
+    val executionInfo: ExecutionInfo  // Execution metadata
+}
+
+interface RunContext : EventContext {
+    val runId: String         // Agent run identifier
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep handlers lightweight">
+    Event handlers execute synchronously in the agent pipeline. Avoid heavy operations that could slow down agent execution.
+  </Accordion>
+  
+  <Accordion title="Use async for external calls">
+    If you need to call external services, use coroutines or background threads to avoid blocking agent execution.
+  </Accordion>
+  
+  <Accordion title="Handle exceptions">
+    Always wrap handler code in try-catch blocks to prevent exceptions from disrupting agent execution.
+  </Accordion>
+  
+  <Accordion title="Log strategically">
+    Don't log every event in production. Focus on errors, important milestones, and metrics.
+  </Accordion>
+  
+  <Accordion title="Combine with other features">
+    Event handlers work great with Tracing for debugging and Memory for stateful operations.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  **Performance**: Event handlers are called synchronously during agent execution. Heavy operations in handlers can significantly impact agent performance.
+</Warning>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Tracing" icon="chart-line" href="/features/tracing">
+    Comprehensive execution tracing with automatic event logging
+  </Card>
+  <Card title="OpenTelemetry" icon="tower-broadcast" href="/features/opentelemetry">
+    Industry-standard observability and distributed tracing
+  </Card>
+</CardGroup>

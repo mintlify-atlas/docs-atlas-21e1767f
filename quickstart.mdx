@@ -1,80 +1,508 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Build your first AI agent with Koog in 5 minutes"
+icon: "rocket"
 ---
 
-## Get started in three steps
+## Overview
 
-Get your documentation site running locally and make your first customization.
+In this quickstart, you'll create a fully functional AI agent that can:
+- Respond to user queries
+- Use tools to perform calculations
+- Handle multi-turn conversations
 
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+By the end, you'll understand the basics of creating agents, defining tools, and connecting to LLM providers.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  Before starting, make sure you've [installed Koog](/installation) in your project.
 </Note>
+
+## Prerequisites
+
+- JDK 17 or higher
+- An API key from at least one LLM provider (OpenAI, Anthropic, Google, etc.)
+- Basic knowledge of Kotlin and coroutines
+
+## Step 1: Set Up Your API Key
+
+First, you'll need an API key from an LLM provider. We'll use OpenAI in this example, but Koog supports multiple providers.
+
+<Steps>
+  <Step title="Get an API key">
+    Sign up at [OpenAI](https://platform.openai.com/) and generate an API key from your dashboard.
+  </Step>
+  <Step title="Set environment variable">
+    Set your API key as an environment variable:
+    
+    ```bash
+    export OPENAI_API_KEY="your-api-key-here"
+    ```
+    
+    Or add it to your IDE's run configuration.
+  </Step>
+</Steps>
+
+<Warning>
+  Never hardcode API keys in your source code. Always use environment variables or secure configuration management.
+</Warning>
+
+## Step 2: Create a Simple Agent
+
+Let's create your first agent - a helpful assistant that can answer questions.
+
+Create a new file called `Main.kt`:
+
+```kotlin Main.kt
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+suspend fun main() {
+    // Get API key from environment
+    val apiKey = System.getenv("OPENAI_API_KEY")
+        ?: error("Please set OPENAI_API_KEY environment variable")
+    
+    // Create a prompt executor (handles LLM communication)
+    simpleOpenAIExecutor(apiKey).use { executor ->
+        // Create the agent
+        val agent = AIAgent(
+            promptExecutor = executor,
+            systemPrompt = "You are a helpful assistant. Answer questions concisely.",
+            llmModel = OpenAIModels.Chat.GPT4oMini
+        )
+        
+        // Run the agent with a user query
+        val result = agent.run("What is Kotlin?")
+        println("Agent: $result")
+    }
+}
+```
+
+Run this code:
+
+```bash
+./gradlew run
+```
+
+<Check>
+  You should see a response from the AI agent explaining what Kotlin is!
+</Check>
+
+## Step 3: Add Tools to Your Agent
+
+Let's make the agent more powerful by giving it tools. We'll create a calculator agent that can perform mathematical operations.
+
+### Define Calculator Tools
+
+Create a new file `CalculatorTools.kt`:
+
+```kotlin CalculatorTools.kt
+import ai.koog.agents.core.tools.annotations.LLMDescription
+import ai.koog.agents.core.tools.annotations.Tool
+import ai.koog.agents.core.tools.reflect.ToolSet
+
+@LLMDescription("Tools for basic calculator operations")
+class CalculatorTools : ToolSet {
+
+    @Tool
+    @LLMDescription("Adds two numbers")
+    fun add(
+        @LLMDescription("First number") a: Double,
+        @LLMDescription("Second number") b: Double
+    ): String {
+        return (a + b).toString()
+    }
+
+    @Tool
+    @LLMDescription("Subtracts second number from first")
+    fun subtract(
+        @LLMDescription("First number") a: Double,
+        @LLMDescription("Second number") b: Double
+    ): String {
+        return (a - b).toString()
+    }
+
+    @Tool
+    @LLMDescription("Multiplies two numbers")
+    fun multiply(
+        @LLMDescription("First number") a: Double,
+        @LLMDescription("Second number") b: Double
+    ): String {
+        return (a * b).toString()
+    }
+
+    @Tool
+    @LLMDescription("Divides first number by second")
+    fun divide(
+        @LLMDescription("First number") a: Double,
+        @LLMDescription("Second number") b: Double
+    ): String {
+        if (b == 0.0) return "Error: Division by zero"
+        return (a / b).toString()
+    }
+}
+```
+
+### Create an Agent with Tools
+
+Update your `Main.kt`:
+
+```kotlin Main.kt
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.core.tools.reflect.asTools
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+suspend fun main() {
+    val apiKey = System.getenv("OPENAI_API_KEY")
+        ?: error("Please set OPENAI_API_KEY environment variable")
+    
+    // Create a tool registry with calculator tools
+    val toolRegistry = ToolRegistry {
+        tools(CalculatorTools().asTools())
+    }
+    
+    simpleOpenAIExecutor(apiKey).use { executor ->
+        val agent = AIAgent(
+            promptExecutor = executor,
+            systemPrompt = "You are a helpful calculator. Use the available tools to solve math problems.",
+            llmModel = OpenAIModels.Chat.GPT4oMini,
+            toolRegistry = toolRegistry
+        )
+        
+        // Test the calculator agent
+        val result = agent.run("What is 25 multiplied by 4, then add 10?")
+        println("Agent: $result")
+    }
+}
+```
+
+Run the code:
+
+```bash
+./gradlew run
+```
+
+<Check>
+  The agent will use the `multiply` and `add` tools to calculate the result: 110
+</Check>
+
+## Step 4: Add Event Handling
+
+Let's observe what the agent is doing by adding event handlers:
+
+```kotlin Main.kt
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.core.tools.reflect.asTools
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+suspend fun main() {
+    val apiKey = System.getenv("OPENAI_API_KEY")
+        ?: error("Please set OPENAI_API_KEY environment variable")
+    
+    val toolRegistry = ToolRegistry {
+        tools(CalculatorTools().asTools())
+    }
+    
+    simpleOpenAIExecutor(apiKey).use { executor ->
+        val agent = AIAgent(
+            promptExecutor = executor,
+            systemPrompt = "You are a helpful calculator. Use the available tools to solve math problems.",
+            llmModel = OpenAIModels.Chat.GPT4oMini,
+            toolRegistry = toolRegistry
+        ) {
+            // Add event handlers to observe agent behavior
+            handleEvents {
+                onToolCallStarting { context ->
+                    println("🔧 Using tool: ${context.toolName}")
+                    println("   Arguments: ${context.toolArgs}")
+                }
+                
+                onToolCallCompleted { context ->
+                    println("✅ Tool result: ${context.result}")
+                }
+                
+                onAgentCompleted { context ->
+                    println("\n✨ Agent finished: ${context.result}")
+                }
+            }
+        }
+        
+        println("=== Calculator Agent ===")
+        agent.run("What is (15 + 25) multiplied by 2?")
+    }
+}
+```
+
+Now you'll see detailed logs showing:
+- Which tools are being called
+- What arguments are being passed
+- What results are returned
+
+## Step 5: Try Different LLM Providers
+
+Koog supports multiple LLM providers. Here's how to use different ones:
+
+<CodeGroup>
+```kotlin OpenAI
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+val apiKey = System.getenv("OPENAI_API_KEY")
+simpleOpenAIExecutor(apiKey).use { executor ->
+    val agent = AIAgent(
+        promptExecutor = executor,
+        llmModel = OpenAIModels.Chat.GPT4o,  // or GPT4oMini, GPT35Turbo
+        systemPrompt = "You are a helpful assistant.",
+        toolRegistry = toolRegistry
+    )
+}
+```
+
+```kotlin Anthropic
+import ai.koog.prompt.executor.llms.all.simpleAnthropicExecutor
+import ai.koog.prompt.executor.clients.anthropic.AnthropicModels
+
+val apiKey = System.getenv("ANTHROPIC_API_KEY")
+simpleAnthropicExecutor(apiKey).use { executor ->
+    val agent = AIAgent(
+        promptExecutor = executor,
+        llmModel = AnthropicModels.Claude_4_Sonnet,  // or Opus, Haiku
+        systemPrompt = "You are a helpful assistant.",
+        toolRegistry = toolRegistry
+    )
+}
+```
+
+```kotlin Google Gemini
+import ai.koog.prompt.executor.llms.all.simpleGoogleExecutor
+import ai.koog.prompt.executor.clients.google.GeminiModels
+
+val apiKey = System.getenv("GEMINI_API_KEY")
+simpleGoogleExecutor(apiKey).use { executor ->
+    val agent = AIAgent(
+        promptExecutor = executor,
+        llmModel = GeminiModels.Gemini15Pro,  // or Gemini15Flash
+        systemPrompt = "You are a helpful assistant.",
+        toolRegistry = toolRegistry
+    )
+}
+```
+
+```kotlin Ollama (Local)
+import ai.koog.prompt.executor.llms.all.simpleOllamaAIExecutor
+import ai.koog.prompt.executor.ollama.client.OllamaModels
+
+// No API key needed - runs locally!
+simpleOllamaAIExecutor(
+    baseUrl = "http://localhost:11434"
+).use { executor ->
+    val agent = AIAgent(
+        promptExecutor = executor,
+        llmModel = OllamaModels.Meta.LLAMA_3_2,
+        systemPrompt = "You are a helpful assistant.",
+        toolRegistry = toolRegistry
+    )
+}
+```
+
+```kotlin OpenRouter
+import ai.koog.prompt.executor.llms.all.simpleOpenRouterExecutor
+import ai.koog.prompt.executor.clients.openrouter.OpenRouterModels
+
+val apiKey = System.getenv("OPENROUTER_API_KEY")
+simpleOpenRouterExecutor(apiKey).use { executor ->
+    val agent = AIAgent(
+        promptExecutor = executor,
+        llmModel = OpenRouterModels.Claude4Sonnet,  // Access multiple providers
+        systemPrompt = "You are a helpful assistant.",
+        toolRegistry = toolRegistry
+    )
+}
+```
+</CodeGroup>
+
+## Step 6: Build an Interactive Chat Agent
+
+Let's create an interactive agent that can handle multi-turn conversations:
+
+```kotlin InteractiveAgent.kt
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.core.tools.reflect.asTools
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+suspend fun main() {
+    val apiKey = System.getenv("OPENAI_API_KEY")
+        ?: error("Please set OPENAI_API_KEY environment variable")
+    
+    val toolRegistry = ToolRegistry {
+        tools(CalculatorTools().asTools())
+    }
+    
+    simpleOpenAIExecutor(apiKey).use { executor ->
+        val agent = AIAgent(
+            promptExecutor = executor,
+            systemPrompt = """
+                You are a helpful calculator assistant. 
+                Use the available tools to solve math problems.
+                Be friendly and explain your reasoning.
+            """.trimIndent(),
+            llmModel = OpenAIModels.Chat.GPT4oMini,
+            toolRegistry = toolRegistry
+        ) {
+            handleEvents {
+                onToolCallStarting { context ->
+                    println("  [Using ${context.toolName}...]")
+                }
+            }
+        }
+        
+        println("=== Calculator Chat Agent ===")
+        println("Type 'quit' to exit\n")
+        
+        while (true) {
+            print("You: ")
+            val input = readlnOrNull()?.trim() ?: break
+            
+            if (input.equals("quit", ignoreCase = true)) {
+                println("Goodbye!")
+                break
+            }
+            
+            if (input.isEmpty()) continue
+            
+            print("Agent: ")
+            val response = agent.run(input)
+            println(response)
+            println()
+        }
+    }
+}
+```
+
+Now you have a fully interactive calculator agent that maintains conversation context!
+
+## Complete Example
+
+Here's a complete example that puts it all together:
+
+```kotlin CompleteExample.kt
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.core.tools.annotations.LLMDescription
+import ai.koog.agents.core.tools.annotations.Tool
+import ai.koog.agents.core.tools.reflect.ToolSet
+import ai.koog.agents.core.tools.reflect.asTools
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+@LLMDescription("Tools for basic math operations")
+class MathTools : ToolSet {
+    @Tool
+    @LLMDescription("Adds two numbers")
+    fun add(
+        @LLMDescription("First number") a: Double,
+        @LLMDescription("Second number") b: Double
+    ) = (a + b).toString()
+    
+    @Tool
+    @LLMDescription("Multiplies two numbers")
+    fun multiply(
+        @LLMDescription("First number") a: Double,
+        @LLMDescription("Second number") b: Double
+    ) = (a * b).toString()
+}
+
+suspend fun main() {
+    val apiKey = System.getenv("OPENAI_API_KEY")
+        ?: error("Set OPENAI_API_KEY environment variable")
+    
+    val tools = ToolRegistry { tools(MathTools().asTools()) }
+    
+    simpleOpenAIExecutor(apiKey).use { executor ->
+        val agent = AIAgent(
+            promptExecutor = executor,
+            systemPrompt = "You are a helpful math assistant.",
+            llmModel = OpenAIModels.Chat.GPT4oMini,
+            toolRegistry = tools
+        ) {
+            handleEvents {
+                onToolCallStarting { println("🔧 ${it.toolName}") }
+                onAgentCompleted { println("✅ Done!") }
+            }
+        }
+        
+        val result = agent.run("Calculate (10 + 5) * 3")
+        println("Result: $result")
+    }
+}
+```
+
+## What You've Learned
+
+<CardGroup cols={2}>
+  <Card title="Agent Creation" icon="robot">
+    How to create an AI agent with a system prompt and LLM model
+  </Card>
+  <Card title="Tool Definition" icon="wrench">
+    How to define and register tools using annotations
+  </Card>
+  <Card title="Event Handling" icon="bell">
+    How to observe agent behavior with event handlers
+  </Card>
+  <Card title="LLM Providers" icon="server">
+    How to switch between different LLM providers
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<Steps>
+  <Step title="Learn Core Concepts">
+    Understand [agents](/concepts/agents), [tools](/concepts/tools), and [strategies](/concepts/strategies) in depth
+  </Step>
+  <Step title="Explore Advanced Features">
+    Add [memory](/features/memory), [persistence](/features/persistence), and [streaming](/features/streaming)
+  </Step>
+  <Step title="Build Complex Workflows">
+    Create [custom strategies](/concepts/strategies) with graph-based workflows
+  </Step>
+  <Step title="Deploy to Production">
+    Integrate with [Spring Boot](/integrations/spring-boot) or [Ktor](/integrations/ktor)
+  </Step>
+</Steps>
+
+## More Examples
+
+Explore more advanced patterns:
+
+<CardGroup cols={2}>
+  <Card title="Streaming Responses" icon="stream" href="/examples/streaming">
+    Process LLM responses in real-time
+  </Card>
+  <Card title="Multi-Agent Systems" icon="users" href="/examples/multi-agent">
+    Build agents that work together
+  </Card>
+  <Card title="Persistent Agents" icon="database" href="/examples/persistence">
+    Save and restore agent state
+  </Card>
+  <Card title="RAG with Memory" icon="brain" href="/examples/rag">
+    Add long-term memory with vector storage
+  </Card>
+</CardGroup>
+
+## Get Help
+
+Need assistance? We're here to help:
+
+- **Slack**: [Join the Koog community](https://docs.koog.ai/koog-slack-channel/)
+- **GitHub**: [Browse examples and contribute](https://github.com/JetBrains/koog)
+- **Issues**: [Report bugs on YouTrack](https://youtrack.jetbrains.com/issues/KG)

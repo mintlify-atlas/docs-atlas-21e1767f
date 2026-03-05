@@ -1,0 +1,637 @@
+---
+title: 'ACP Agent Integration'
+description: 'Connect Koog agents to IntelliJ IDEA using the Agent Communication Protocol'
+icon: 'plug'
+---
+
+Integrate your Koog agents directly with IntelliJ IDEA using the Agent Communication Protocol (ACP). This enables AI-powered coding assistance with full IDE context awareness.
+
+## What is ACP?
+
+The [Agent Communication Protocol (ACP)](https://www.jetbrains.com/help/idea/acp.html) is a standardized protocol developed by JetBrains that enables seamless integration of AI agents with development environments.
+
+**Key Features:**
+- Bidirectional communication via JSON-RPC over stdio
+- Tool execution capabilities (file operations, code analysis)
+- Session management for maintaining conversation context
+- Event notifications for real-time updates
+
+## What This Example Demonstrates
+
+This example shows how to:
+- Create an ACP-compatible agent using Koog
+- Connect the agent to IntelliJ IDEA
+- Implement file operations (list, read, edit)
+- Handle agent sessions and prompts
+- Test agents using terminal clients
+
+## Agent Capabilities
+
+The ACP agent provides three core tools:
+
+<CardGroup cols={3}>
+  <Card title="List Directory" icon="folder">
+    Browse project file structure and list directory contents
+  </Card>
+  
+  <Card title="Read File" icon="file">
+    Read and analyze source code files with full content access
+  </Card>
+  
+  <Card title="Edit File" icon="pen">
+    Make targeted code changes with precise string replacements
+  </Card>
+</CardGroup>
+
+## Prerequisites
+
+- **Java 17+**
+- **IntelliJ IDEA 2024.3+ EAP** with ACP support
+- **OpenAI API key**
+- **Gradle** (included in project)
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone https://github.com/koogio/koog.git
+    cd koog/examples/acp-agent
+    ```
+  </Step>
+
+  <Step title="Build the Agent">
+    Create a distributable application:
+    ```bash
+    ./gradlew clean installDist
+    ```
+    
+    This creates an executable in `build/install/acp-agent/bin/`
+  </Step>
+
+  <Step title="Configure IntelliJ">
+    Add your agent to IntelliJ's ACP configuration:
+    
+    1. Open IntelliJ IDEA
+    2. Navigate to **AI Chat > Options > Configure ACP Agents**
+    3. Add the following JSON:
+    
+    ```json
+    {
+        "agent_servers": {
+            "Koog Agent": {
+                "command": "/absolute/path/to/acp-agent/build/install/acp-agent/bin/acp-agent",
+                "args": [],
+                "env": {
+                    "OPENAI_API_KEY": "your_openai_api_key_here"
+                }
+            }
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Use in AI Chat">
+    1. Open AI Chat in IntelliJ
+    2. Select "Koog Agent" from the agent dropdown
+    3. Start coding with AI assistance!
+  </Step>
+</Steps>
+
+## Implementation Details
+
+### Agent Entry Point
+
+The main ACP agent initializes stdio transport and connects to the IDE:
+
+```kotlin AcpAgent.kt
+package ai.coding.agent
+
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.ext.acp.support.AcpKoogAgentSupport
+import com.agentclientprotocol.agent.AgentServer
+import com.agentclientprotocol.transport.StdioTransport
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+
+fun main() = runBlocking {
+    val token = System.getenv("OPENAI_API_KEY")
+        ?: error("OPENAI_API_KEY environment variable is not set")
+
+    val agentSupport = AcpKoogAgentSupport(
+        name = "Koog Code Agent",
+        description = "AI coding assistant powered by Koog framework",
+        createAgent = { sessionId ->
+            createKoogAgent(
+                token = token,
+                sessionId = sessionId
+            )
+        }
+    )
+
+    val transport = StdioTransport(
+        parentScope = this,
+        ioDispatcher = Dispatchers.IO
+    )
+
+    val server = AgentServer(
+        agentSupport = agentSupport,
+        transport = transport
+    )
+
+    server.start()
+    transport.waitForClose()
+}
+```
+
+### Koog Agent Creation
+
+Create a Koog agent with file operation tools:
+
+```kotlin KoogAgentSupport.kt
+private fun createKoogAgent(
+    token: String,
+    sessionId: String
+): AIAgent<String, String> {
+    val executor = simpleOpenAIExecutor(token)
+    
+    val toolRegistry = ToolRegistry {
+        tool(ListDirectoryTool(JVMFileSystemProvider.ReadWrite))
+        tool(ReadFileTool(JVMFileSystemProvider.ReadWrite))
+        tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+    }
+
+    return AIAgent(
+        promptExecutor = executor,
+        llmModel = OpenAIModels.Chat.GPT5Codex,
+        toolRegistry = toolRegistry,
+        systemPrompt = """
+            You are an AI coding assistant integrated with IntelliJ IDEA.
+            You have access to the user's codebase through file operations.
+            
+            When making code changes:
+            - Read files to understand context
+            - Make minimal, targeted edits
+            - Explain your changes clearly
+            - Consider the broader codebase architecture
+            
+            You can:
+            - List directories to explore project structure
+            - Read files to understand code
+            - Edit files to make changes
+        """.trimIndent(),
+        strategy = singleRunStrategy(),
+        maxIterations = 100
+    ) {
+        handleEvents {
+            onToolCallStarting { ctx ->
+                println("[Session $sessionId] Tool called: ${ctx.toolName}")
+            }
+        }
+    }
+}
+```
+
+### File Operation Tools
+
+The agent uses Koog's built-in file tools:
+
+```kotlin KoogTools.kt
+import ai.koog.agents.ext.tool.file.EditFileTool
+import ai.koog.agents.ext.tool.file.ListDirectoryTool
+import ai.koog.agents.ext.tool.file.ReadFileTool
+import ai.koog.rag.base.files.JVMFileSystemProvider
+
+val toolRegistry = ToolRegistry {
+    // List files and directories
+    tool(ListDirectoryTool(JVMFileSystemProvider.ReadWrite))
+    
+    // Read file contents
+    tool(ReadFileTool(JVMFileSystemProvider.ReadWrite))
+    
+    // Edit files with string replacement
+    tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+}
+```
+
+**Tool Capabilities:**
+
+<Accordion title="ListDirectoryTool">
+  Lists all files and subdirectories at a given path.
+  
+  **Arguments:**
+  - `path`: Absolute path to directory
+  
+  **Returns:** List of files and directories with metadata
+</Accordion>
+
+<Accordion title="ReadFileTool">
+  Reads complete file contents.
+  
+  **Arguments:**
+  - `path`: Absolute path to file
+  
+  **Returns:** Full file content as string
+</Accordion>
+
+<Accordion title="EditFileTool">
+  Makes targeted edits using string replacement.
+  
+  **Arguments:**
+  - `path`: Absolute path to file
+  - `oldString`: Exact text to replace
+  - `newString`: Replacement text
+  
+  **Returns:** Success confirmation or error details
+</Accordion>
+
+## Testing Without IDE
+
+You can test the agent using terminal clients before IDE integration.
+
+### Pipe Application
+
+Uses in-process pipe for communication:
+
+```kotlin PipeApp.kt
+package ai.coding.app
+
+import ai.coding.client.runTerminalClient
+import com.agentclientprotocol.transport.PipeTransport
+import kotlinx.coroutines.coroutineScope
+
+suspend fun main() = coroutineScope {
+    val token = System.getenv("OPENAI_API_KEY")
+        ?: error("OPENAI_API_KEY env variable is not set")
+
+    val pipe = PipeTransport.create(this)
+    
+    // Start agent server
+    val agentSupport = createAgentSupport(token)
+    val server = AgentServer(agentSupport, pipe.serverTransport)
+    server.start()
+
+    // Start client
+    runTerminalClient(pipe.clientTransport)
+}
+```
+
+**Run it:**
+```bash
+OPENAI_API_KEY=your_key ./gradlew run --args='ai.coding.app.PipeApp'
+```
+
+### Process Application
+
+Spawns agent as a subprocess:
+
+```kotlin ProcessApp.kt
+package ai.coding.app
+
+import ai.coding.client.runTerminalClient
+import com.agentclientprotocol.transport.StdioTransport
+import kotlinx.coroutines.coroutineScope
+
+suspend fun main() = coroutineScope {
+    val token = System.getenv("OPENAI_API_KEY")
+        ?: error("OPENAI_API_KEY env variable is not set")
+    val agentPath = System.getenv("AGENT_PATH")
+        ?: error("AGENT_PATH env variable is not set")
+
+    val process = ProcessBuilder(agentPath)
+        .apply {
+            environment()["OPENAI_API_KEY"] = token
+        }
+        .redirectInput(ProcessBuilder.Redirect.PIPE)
+        .redirectOutput(ProcessBuilder.Redirect.PIPE)
+        .start()
+
+    val stdin = process.outputStream.asSink().buffered()
+    val stdout = process.inputStream.asSource().buffered()
+
+    val clientTransport = StdioTransport(
+        parentScope = this,
+        ioDispatcher = Dispatchers.IO,
+        input = stdout,
+        output = stdin
+    )
+
+    try {
+        runTerminalClient(clientTransport)
+    } finally {
+        clientTransport.close()
+    }
+}
+```
+
+**Run it:**
+```bash
+OPENAI_API_KEY=your_key \
+AGENT_PATH=/path/to/acp-agent/build/install/acp-agent/bin/acp-agent \
+./gradlew run --args='ai.coding.app.ProcessApp'
+```
+
+## IntelliJ IDEA Configuration
+
+### Configuration File Location
+
+IntelliJ stores ACP configurations in:
+
+<Tabs>
+  <Tab title="macOS">
+    ```
+    ~/Library/Application Support/JetBrains/IntelliJIdea{VERSION}/options/acp-agents.json
+    ```
+  </Tab>
+  
+  <Tab title="Linux">
+    ```
+    ~/.config/JetBrains/IntelliJIdea{VERSION}/options/acp-agents.json
+    ```
+  </Tab>
+  
+  <Tab title="Windows">
+    ```
+    %APPDATA%\JetBrains\IntelliJIdea{VERSION}\options\acp-agents.json
+    ```
+  </Tab>
+</Tabs>
+
+### Configuration Format
+
+```json acp-agents.json
+{
+    "agent_servers": {
+        "Koog Agent": {
+            "command": "/Users/yourname/koog/examples/acp-agent/build/install/acp-agent/bin/acp-agent",
+            "args": [],
+            "env": {
+                "OPENAI_API_KEY": "sk-proj-...",
+                "OPENAI_BASE_URL": "https://api.openai.com/v1"
+            }
+        },
+        "Koog Agent (Claude)": {
+            "command": "/Users/yourname/koog/examples/acp-agent/build/install/acp-agent/bin/acp-agent",
+            "args": [],
+            "env": {
+                "ANTHROPIC_API_KEY": "sk-ant-...",
+                "USE_CLAUDE": "true"
+            }
+        }
+    }
+}
+```
+
+**Configuration Options:**
+
+- **`command`**: Absolute path to agent executable
+- **`args`**: Command-line arguments (typically empty)
+- **`env`**: Environment variables:
+  - `OPENAI_API_KEY`: Your OpenAI API key (required)
+  - `ANTHROPIC_API_KEY`: Your Anthropic API key (optional)
+  - `OPENAI_BASE_URL`: Custom OpenAI endpoint (optional)
+  - Any custom environment variables your agent needs
+
+### Multiple Agent Configurations
+
+You can configure multiple agents with different models or configurations:
+
+```json
+{
+    "agent_servers": {
+        "Koog Fast (GPT-4)": {
+            "command": "/path/to/acp-agent",
+            "env": {
+                "OPENAI_API_KEY": "...",
+                "MODEL": "gpt-4-turbo"
+            }
+        },
+        "Koog Smart (GPT-5)": {
+            "command": "/path/to/acp-agent",
+            "env": {
+                "OPENAI_API_KEY": "...",
+                "MODEL": "gpt-5-codex"
+            }
+        }
+    }
+}
+```
+
+## Example Use Cases
+
+### Code Review
+
+```
+User: Review the KoogAgentSupport.kt file and suggest improvements
+
+Agent: [Reads file, analyzes code]
+I've reviewed the file. Here are my suggestions:
+
+1. Add error handling for null sessionId
+2. Extract agent creation into a factory class
+3. Add KDoc comments to public methods
+
+Would you like me to implement these changes?
+```
+
+### Refactoring
+
+```
+User: Extract the agent initialization logic from AcpAgent.kt into a separate AgentFactory class
+
+Agent: [Reads AcpAgent.kt, creates new AgentFactory.kt, updates AcpAgent.kt]
+I've created a new AgentFactory class and updated AcpAgent.kt to use it. 
+The changes improve code organization and make the agent creation logic reusable.
+
+Changes:
+- Created src/main/kotlin/ai/coding/agent/AgentFactory.kt
+- Refactored AcpAgent.kt to use the factory
+- Added documentation
+```
+
+### Bug Fixing
+
+```
+User: There's a null pointer exception in the session creation. Can you fix it?
+
+Agent: [Searches for session creation code, identifies issue, makes fix]
+Found the issue in KoogAgentSupport.kt line 42. The sessionId wasn't being validated before use.
+
+I've added null checking and a meaningful error message.
+```
+
+### Feature Addition
+
+```
+User: Add a new tool for searching code using regex
+
+Agent: [Creates RegexSearchTool.kt, updates tool registry]
+I've added a RegexSearchTool that searches files using regular expressions.
+
+New files:
+- src/main/kotlin/ai/coding/agent/tools/RegexSearchTool.kt
+
+Updated:
+- KoogTools.kt to include the new tool
+
+The tool supports searching across multiple files with pattern matching.
+```
+
+## Customizing Your Agent
+
+### Change the LLM Model
+
+Modify the agent creation to use different models:
+
+```kotlin
+// Use GPT-4 Turbo
+llmModel = OpenAIModels.Chat.GPT4Turbo
+
+// Use Claude
+val executor = simpleAnthropicExecutor(anthropicKey)
+llmModel = AnthropicModels.Claude_3_5_Sonnet
+
+// Use local model via Ollama
+val executor = simpleOllamaExecutor("http://localhost:11434")
+llmModel = OllamaModels.CodeLlama
+```
+
+### Add Custom Tools
+
+Extend the agent with additional capabilities:
+
+```kotlin
+class GitOperationsTool : ToolSet {
+    @Tool
+    @LLMDescription("Get git status")
+    fun getGitStatus(repoPath: String): String {
+        val process = ProcessBuilder("git", "status")
+            .directory(File(repoPath))
+            .start()
+        return process.inputStream.readBytes().toString(Charsets.UTF_8)
+    }
+    
+    @Tool
+    @LLMDescription("Create git commit")
+    fun createCommit(repoPath: String, message: String): String {
+        // Implementation
+    }
+}
+
+val toolRegistry = ToolRegistry {
+    tool(ListDirectoryTool(JVMFileSystemProvider.ReadWrite))
+    tool(ReadFileTool(JVMFileSystemProvider.ReadWrite))
+    tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+    tools(GitOperationsTool().asTools())  // Add git tools
+}
+```
+
+### Modify System Prompt
+
+Customize the agent's behavior and personality:
+
+```kotlin
+systemPrompt = """
+    You are a senior Kotlin developer and code reviewer.
+    
+    Your expertise includes:
+    - Kotlin best practices and idioms
+    - Clean code principles
+    - Design patterns
+    - Performance optimization
+    
+    When reviewing code:
+    1. Check for potential bugs and edge cases
+    2. Suggest performance improvements
+    3. Recommend better abstractions
+    4. Ensure code follows Kotlin conventions
+    
+    Always explain your reasoning and provide examples.
+""".trimIndent()
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Agent not appearing in IntelliJ">
+    **Checks:**
+    1. Verify IntelliJ version is 2024.3+ EAP with ACP support
+    2. Ensure configuration file path is correct
+    3. Restart IntelliJ after adding configuration
+    4. Check that the executable path is absolute (not relative)
+    5. Verify executable has proper permissions (`chmod +x`)
+  </Accordion>
+
+  <Accordion title="API Key Errors">
+    **Solutions:**
+    1. Verify API key is valid and active
+    2. Check environment variable name matches your configuration
+    3. Ensure no extra spaces in the API key value
+    4. Test the key with a simple curl command first
+  </Accordion>
+
+  <Accordion title="Agent Crashes or Timeouts">
+    **Debug steps:**
+    1. Run the agent manually from terminal to see error messages
+    2. Check agent logs (if configured)
+    3. Reduce `maxIterations` if hitting timeout
+    4. Verify file system permissions for ReadWrite operations
+  </Accordion>
+
+  <Accordion title="Tool Execution Failures">
+    **Common issues:**
+    1. File paths must be absolute, not relative
+    2. Ensure ReadWrite permissions are set correctly
+    3. Check that files exist before editing
+    4. Verify string replacements match exactly (case-sensitive)
+  </Accordion>
+</AccordionGroup>
+
+## Project Structure
+
+```
+acp-agent/
+├── src/main/kotlin/
+│   ├── ai/coding/agent/
+│   │   ├── AcpAgent.kt           # Main entry point
+│   │   ├── KoogAgentSupport.kt    # Agent initialization
+│   │   └── KoogTools.kt           # Tool definitions
+│   ├── ai/coding/app/
+│   │   ├── PipeApp.kt             # Pipe transport test
+│   │   └── ProcessApp.kt          # Process transport test
+│   └── ai/coding/client/
+│       ├── TerminalClientOperations.kt
+│       └── util.kt
+├── build.gradle.kts
+└── README.md
+```
+
+## Source Code
+
+<Card title="View on GitHub" icon="github" href="https://github.com/koogio/koog/tree/main/examples/acp-agent">
+  Explore the complete ACP agent implementation
+</Card>
+
+## Learn More
+
+<CardGroup cols={2}>
+  <Card title="ACP Documentation" icon="book" href="https://www.jetbrains.com/help/idea/acp.html">
+    Official JetBrains ACP documentation
+  </Card>
+  
+  <Card title="Custom Tools" icon="wrench" href="/core-concepts/tools">
+    Learn how to create custom tools
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Spring Boot Integration" icon="leaf" href="/examples/spring-boot-integration">
+    Deploy agents as REST APIs
+  </Card>
+  
+  <Card title="Agent Strategies" icon="diagram-project" href="/core-concepts/strategies">
+    Create custom agent behaviors
+  </Card>
+</CardGroup>

@@ -1,0 +1,336 @@
+---
+title: AIAgentStrategy
+description: Interface defining the execution strategy for AI agents
+---
+
+## Overview
+
+`AIAgentStrategy` is the core interface that defines how an AI agent processes input to produce output. It encapsulates the decision-making, workflow, and processing logic that determines agent behavior.
+
+<Note>
+  AIAgentStrategy is an `expect` interface with platform-specific implementations for different Kotlin multiplatform targets.
+</Note>
+
+## Interface Definition
+
+```kotlin
+public expect interface AIAgentStrategy<TInput, TOutput, TContext : AIAgentContext>
+```
+
+### Type Parameters
+
+<ParamField path="TInput" type="Generic">
+  The type of input data that the strategy will process
+</ParamField>
+
+<ParamField path="TOutput" type="Generic">
+  The type of output data that the strategy will generate
+</ParamField>
+
+<ParamField path="TContext" type="AIAgentContext">
+  The type of context in which the strategy is executed, extending AIAgentContext
+</ParamField>
+
+## Properties
+
+<ResponseField name="name" type="String" required>
+  A human-readable identifier for the strategy, used for logging, debugging, and distinguishing between multiple strategies
+</ResponseField>
+
+## Methods
+
+### execute
+
+Executes the AI agent's strategy using the provided context and input.
+
+```kotlin
+public suspend fun execute(
+    context: TContext,
+    input: TInput
+): TOutput?
+```
+
+<ParamField path="context" type="TContext" required>
+  The execution context providing access to the agent's configuration, pipeline, environment, and other components required for execution
+</ParamField>
+
+<ParamField path="input" type="TInput" required>
+  The input data to be processed by the AI agent's strategy
+</ParamField>
+
+<ResponseField name="return" type="TOutput?">
+  The output produced by the agent's strategy, or null if no output is generated
+</ResponseField>
+
+## Strategy Types
+
+### AIAgentGraphStrategy
+
+Graph-based execution strategy with node-based workflows:
+
+```kotlin
+interface AIAgentGraphStrategy<TInput, TOutput> : 
+    AIAgentStrategy<TInput, TOutput, AIAgentGraphContext>
+```
+
+### AIAgentFunctionalStrategy
+
+Functional execution strategy with composable functions:
+
+```kotlin
+interface AIAgentFunctionalStrategy<TInput, TOutput> : 
+    AIAgentStrategy<TInput, TOutput, AIAgentFunctionalContext>
+```
+
+### AIAgentPlannerStrategy
+
+Planning-based strategy using goal-oriented action planning (GOAP):
+
+```kotlin
+interface AIAgentPlannerStrategy<TInput, TOutput, WorldState> : 
+    AIAgentStrategy<TInput, TOutput, AIAgentPlannerContext<WorldState>>
+```
+
+## Implementation Examples
+
+### Simple Custom Strategy
+
+```kotlin
+class EchoStrategy : AIAgentGraphStrategy<String, String> {
+    override val name = "echo-strategy"
+    
+    override suspend fun execute(
+        context: AIAgentGraphContext,
+        input: String
+    ): String {
+        // Simple strategy that echoes input with LLM processing
+        val response = context.llm.prompt.execute()
+        return response.content
+    }
+}
+```
+
+### Graph-based Strategy
+
+```kotlin
+class MultiStepStrategy : AIAgentGraphStrategy<String, String> {
+    override val name = "multi-step"
+    
+    override suspend fun execute(
+        context: AIAgentGraphContext,
+        input: String
+    ): String? {
+        // Create a graph with multiple stages
+        return context.graph {
+            val analyzeStage = stage("analyze") {
+                // Analyze input with LLM
+                val result = context.llm.prompt.execute()
+                result.content
+            }
+            
+            val processStage = stage("process") {
+                // Process analysis result
+                val analysis = it as String
+                context.environment.executeTool(processingTool)
+            }
+            
+            val finalizeStage = stage("finalize") {
+                // Generate final output
+                val processed = it as ToolResult
+                "Final result: $processed"
+            }
+            
+            // Define edges
+            start() goesTo analyzeStage
+            analyzeStage goesTo processStage
+            processStage goesTo finalizeStage
+            finalizeStage goesTo finish()
+        }
+    }
+}
+```
+
+### Strategy with Tool Selection
+
+```kotlin
+class SmartToolStrategy : AIAgentGraphStrategy<String, String> {
+    override val name = "smart-tool"
+    
+    override suspend fun execute(
+        context: AIAgentGraphContext,
+        input: String
+    ): String? {
+        // Let LLM decide which tools to use
+        val response = context.llm.prompt {
+            user(input)
+        }.execute()
+        
+        // Process tool calls
+        if (response is Message.Assistant.ToolCall) {
+            val toolResults = context.environment.executeTools(
+                response.toolCalls
+            )
+            
+            // Send results back to LLM
+            return context.llm.prompt {
+                toolResults.forEach { result ->
+                    tool(result)
+                }
+            }.execute().content
+        }
+        
+        return response.content
+    }
+}
+```
+
+### Functional Strategy
+
+```kotlin
+class PipelineStrategy : AIAgentFunctionalStrategy<String, String> {
+    override val name = "pipeline"
+    
+    override suspend fun execute(
+        context: AIAgentFunctionalContext,
+        input: String
+    ): String? {
+        return input
+            .let { preprocess(context, it) }
+            .let { analyze(context, it) }
+            .let { postprocess(context, it) }
+    }
+    
+    private suspend fun preprocess(
+        context: AIAgentFunctionalContext,
+        input: String
+    ): String {
+        // Preprocessing logic
+        return input.trim().lowercase()
+    }
+    
+    private suspend fun analyze(
+        context: AIAgentFunctionalContext,
+        input: String
+    ): String {
+        // Call LLM for analysis
+        return context.llm.prompt {
+            user(input)
+        }.execute().content
+    }
+    
+    private suspend fun postprocess(
+        context: AIAgentFunctionalContext,
+        result: String
+    ): String {
+        // Final formatting
+        return result.trim()
+    }
+}
+```
+
+## Built-in Strategies
+
+### Single Run Strategy
+
+Executes a single LLM call with optional tool usage:
+
+```kotlin
+val strategy = singleRunStrategy()
+
+val agent = AIAgent(
+    promptExecutor = executor,
+    agentConfig = config,
+    strategy = strategy
+)
+```
+
+### Multi-turn Strategy
+
+Handles multiple back-and-forth interactions:
+
+```kotlin
+val strategy = multiTurnStrategy(
+    maxTurns = 5
+)
+```
+
+## Context Access
+
+Strategies have access to the execution context:
+
+```kotlin
+override suspend fun execute(
+    context: AIAgentGraphContext,
+    input: String
+): String? {
+    // Access configuration
+    val maxIterations = context.agentConfig.maxIterations
+    
+    // Access LLM
+    val response = context.llm.prompt.execute()
+    
+    // Access environment for tools
+    val toolResult = context.environment.executeTool(toolCall)
+    
+    // Access pipeline for features
+    context.pipeline.onLLMCallStarting(...)
+    
+    // Access execution info
+    val runId = context.runId
+    val executionInfo = context.executionInfo
+    
+    return response.content
+}
+```
+
+## Error Handling
+
+```kotlin
+class RobustStrategy : AIAgentGraphStrategy<String, String> {
+    override val name = "robust"
+    
+    override suspend fun execute(
+        context: AIAgentGraphContext,
+        input: String
+    ): String? {
+        return try {
+            val result = context.llm.prompt.execute()
+            result.content
+        } catch (e: Exception) {
+            context.environment.reportProblem(e)
+            null
+        }
+    }
+}
+```
+
+## Best Practices
+
+<Note>
+  **Strategy Design**
+  
+  - Keep strategies focused on a single responsibility
+  - Use descriptive names for logging and debugging
+  - Handle errors gracefully and report problems via the environment
+  - Leverage the context for access to agent components
+  - Use suspend functions for async operations
+</Note>
+
+<Warning>
+  **Performance Considerations**
+  
+  - Strategies execute in the agent's coroutine scope
+  - Avoid blocking operations in the execute method
+  - Use the environment interface for tool execution (not direct calls)
+  - Consider iteration limits in recursive strategies
+</Warning>
+
+## Related Types
+
+- [AIAgent](/api/ai-agent) - Uses strategies for execution
+- [AIAgentEnvironment](/api/ai-agent-environment) - Provides tool execution context
+- [AIAgentPipeline](/api/ai-agent-pipeline) - Feature pipeline accessible from context
+
+## Source Reference
+
+Defined in: `agents-core/src/commonMain/kotlin/ai/koog/agents/core/agent/entity/AIAgentStrategy.kt`

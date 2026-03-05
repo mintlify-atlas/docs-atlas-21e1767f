@@ -1,0 +1,519 @@
+---
+title: Tool Descriptors
+description: Schema definitions that describe tool interfaces for LLM consumption
+---
+
+## Overview
+
+Tool descriptors define the schema that describes a tool's interface to language models. They specify the tool's name, description, parameters, and parameter types in a format that LLMs can understand and use for function calling.
+
+## ToolDescriptor
+
+Represents a complete tool descriptor with name, description, and parameters.
+
+```kotlin
+public open class ToolDescriptor(
+    public val name: String,
+    public val description: String,
+    public val requiredParameters: List<ToolParameterDescriptor> = emptyList(),
+    public val optionalParameters: List<ToolParameterDescriptor> = emptyList()
+)
+```
+
+### Constructor Parameters
+
+<ParamField path="name" type="String" required>
+  The name of the tool (used by LLM to invoke it)
+</ParamField>
+
+<ParamField path="description" type="String" required>
+  Human-readable description explaining what the tool does and when to use it
+</ParamField>
+
+<ParamField path="requiredParameters" type="List<ToolParameterDescriptor>" default="emptyList()">
+  List of parameters that must be provided when calling the tool
+</ParamField>
+
+<ParamField path="optionalParameters" type="List<ToolParameterDescriptor>" default="emptyList()">
+  List of parameters that can optionally be provided
+</ParamField>
+
+### Methods
+
+#### copy
+
+Creates a copy of the descriptor with modified attributes.
+
+```kotlin
+public fun copy(
+    name: String = this.name,
+    description: String = this.description,
+    requiredParameters: List<ToolParameterDescriptor> = this.requiredParameters,
+    optionalParameters: List<ToolParameterDescriptor> = this.optionalParameters
+): ToolDescriptor
+```
+
+## ToolParameterDescriptor
+
+Describes a single tool parameter.
+
+```kotlin
+public data class ToolParameterDescriptor(
+    val name: String,
+    val description: String,
+    val type: ToolParameterType
+)
+```
+
+<Note>
+  Parameter names should use snake_case as they are automatically converted from camelCase during serialization.
+</Note>
+
+### Properties
+
+<ResponseField name="name" type="String" required>
+  The name of the parameter in snake_case
+</ResponseField>
+
+<ResponseField name="description" type="String" required>
+  Human-readable description of the parameter's purpose
+</ResponseField>
+
+<ResponseField name="type" type="ToolParameterType" required>
+  The data type of the parameter
+</ResponseField>
+
+## ToolParameterType
+
+Sealed class representing different parameter data types.
+
+```kotlin
+public sealed class ToolParameterType(public val name: String)
+```
+
+### Primitive Types
+
+#### String
+
+```kotlin
+public data object String : ToolParameterType("STRING")
+```
+
+Represents a text string parameter.
+
+#### Integer
+
+```kotlin
+public data object Integer : ToolParameterType("INT")
+```
+
+Represents an integer number parameter.
+
+#### Float
+
+```kotlin
+public data object Float : ToolParameterType("FLOAT")
+```
+
+Represents a floating-point number parameter.
+
+#### Boolean
+
+```kotlin
+public data object Boolean : ToolParameterType("BOOLEAN")
+```
+
+Represents a true/false boolean parameter.
+
+#### Null
+
+```kotlin
+public data object Null : ToolParameterType("NULL")
+```
+
+Represents a null value.
+
+### Complex Types
+
+#### Enum
+
+```kotlin
+public data class Enum(
+    val entries: Array<String>
+) : ToolParameterType("ENUM")
+```
+
+<ParamField path="entries" type="Array<String>" required>
+  The allowed values for the enumeration
+</ParamField>
+
+**Factory Methods:**
+
+```kotlin
+public fun Enum(entries: EnumEntries<*>): Enum
+public fun Enum(entries: Array<Enum<*>>): Enum
+```
+
+#### List
+
+```kotlin
+public data class List(
+    val itemsType: ToolParameterType
+) : ToolParameterType("ARRAY")
+```
+
+<ParamField path="itemsType" type="ToolParameterType" required>
+  The type of items in the list
+</ParamField>
+
+#### Object
+
+```kotlin
+public data class Object(
+    val properties: List<ToolParameterDescriptor>,
+    val requiredProperties: List<String> = listOf(),
+    val additionalProperties: Boolean? = null,
+    val additionalPropertiesType: ToolParameterType? = null
+) : ToolParameterType("OBJECT")
+```
+
+<ParamField path="properties" type="List<ToolParameterDescriptor>" required>
+  Descriptors for the object's properties
+</ParamField>
+
+<ParamField path="requiredProperties" type="List<String>" default="listOf()">
+  Names of properties that are required
+</ParamField>
+
+<ParamField path="additionalProperties" type="Boolean?" default="null">
+  Whether additional properties beyond those defined are allowed
+</ParamField>
+
+<ParamField path="additionalPropertiesType" type="ToolParameterType?" default="null">
+  The type of additional properties, if allowed
+</ParamField>
+
+#### AnyOf
+
+```kotlin
+public data class AnyOf(
+    val types: Array<ToolParameterDescriptor>
+) : ToolParameterType("ANYOF")
+```
+
+<ParamField path="types" type="Array<ToolParameterDescriptor>" required>
+  Array of possible type descriptors
+</ParamField>
+
+## Usage Examples
+
+### Simple Tool Descriptor
+
+```kotlin
+val descriptor = ToolDescriptor(
+    name = "calculator",
+    description = "Performs basic arithmetic operations",
+    requiredParameters = listOf(
+        ToolParameterDescriptor(
+            name = "operation",
+            description = "The arithmetic operation to perform",
+            type = ToolParameterType.Enum(
+                arrayOf("add", "subtract", "multiply", "divide")
+            )
+        ),
+        ToolParameterDescriptor(
+            name = "a",
+            description = "First number",
+            type = ToolParameterType.Float
+        ),
+        ToolParameterDescriptor(
+            name = "b",
+            description = "Second number",
+            type = ToolParameterType.Float
+        )
+    )
+)
+```
+
+### Tool with Optional Parameters
+
+```kotlin
+val searchDescriptor = ToolDescriptor(
+    name = "web_search",
+    description = "Searches the web for information",
+    requiredParameters = listOf(
+        ToolParameterDescriptor(
+            name = "query",
+            description = "The search query",
+            type = ToolParameterType.String
+        )
+    ),
+    optionalParameters = listOf(
+        ToolParameterDescriptor(
+            name = "max_results",
+            description = "Maximum number of results to return",
+            type = ToolParameterType.Integer
+        ),
+        ToolParameterDescriptor(
+            name = "safe_search",
+            description = "Enable safe search filtering",
+            type = ToolParameterType.Boolean
+        )
+    )
+)
+```
+
+### Tool with Complex Object Parameters
+
+```kotlin
+val emailDescriptor = ToolDescriptor(
+    name = "send_email",
+    description = "Sends an email message",
+    requiredParameters = listOf(
+        ToolParameterDescriptor(
+            name = "recipient",
+            description = "Email recipient",
+            type = ToolParameterType.Object(
+                properties = listOf(
+                    ToolParameterDescriptor(
+                        name = "email",
+                        description = "Email address",
+                        type = ToolParameterType.String
+                    ),
+                    ToolParameterDescriptor(
+                        name = "name",
+                        description = "Recipient name",
+                        type = ToolParameterType.String
+                    )
+                ),
+                requiredProperties = listOf("email")
+            )
+        ),
+        ToolParameterDescriptor(
+            name = "subject",
+            description = "Email subject",
+            type = ToolParameterType.String
+        ),
+        ToolParameterDescriptor(
+            name = "body",
+            description = "Email body content",
+            type = ToolParameterType.String
+        )
+    ),
+    optionalParameters = listOf(
+        ToolParameterDescriptor(
+            name = "cc",
+            description = "CC recipients",
+            type = ToolParameterType.List(
+                itemsType = ToolParameterType.String
+            )
+        ),
+        ToolParameterDescriptor(
+            name = "attachments",
+            description = "File attachments",
+            type = ToolParameterType.List(
+                itemsType = ToolParameterType.Object(
+                    properties = listOf(
+                        ToolParameterDescriptor(
+                            name = "filename",
+                            description = "Name of the file",
+                            type = ToolParameterType.String
+                        ),
+                        ToolParameterDescriptor(
+                            name = "content",
+                            description = "Base64 encoded file content",
+                            type = ToolParameterType.String
+                        )
+                    ),
+                    requiredProperties = listOf("filename", "content")
+                )
+            )
+        )
+    )
+)
+```
+
+### Tool with Enum from Kotlin Enum
+
+```kotlin
+enum class Priority {
+    LOW, MEDIUM, HIGH, URGENT
+}
+
+val taskDescriptor = ToolDescriptor(
+    name = "create_task",
+    description = "Creates a new task",
+    requiredParameters = listOf(
+        ToolParameterDescriptor(
+            name = "title",
+            description = "Task title",
+            type = ToolParameterType.String
+        ),
+        ToolParameterDescriptor(
+            name = "priority",
+            description = "Task priority level",
+            type = ToolParameterType.Enum(Priority.entries)
+        )
+    )
+)
+```
+
+### Tool with AnyOf
+
+```kotlin
+val flexibleSearchDescriptor = ToolDescriptor(
+    name = "flexible_search",
+    description = "Searches with flexible input types",
+    requiredParameters = listOf(
+        ToolParameterDescriptor(
+            name = "query",
+            description = "Search query - can be string or structured object",
+            type = ToolParameterType.AnyOf(
+                arrayOf(
+                    ToolParameterDescriptor(
+                        name = "string_query",
+                        description = "Simple string query",
+                        type = ToolParameterType.String
+                    ),
+                    ToolParameterDescriptor(
+                        name = "structured_query",
+                        description = "Structured search query",
+                        type = ToolParameterType.Object(
+                            properties = listOf(
+                                ToolParameterDescriptor(
+                                    name = "keywords",
+                                    description = "Search keywords",
+                                    type = ToolParameterType.List(
+                                        ToolParameterType.String
+                                    )
+                                ),
+                                ToolParameterDescriptor(
+                                    name = "filters",
+                                    description = "Search filters",
+                                    type = ToolParameterType.Object(
+                                        properties = emptyList(),
+                                        additionalProperties = true
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+)
+```
+
+### Automatic Descriptor Generation
+
+Descriptors are typically generated automatically from serializers:
+
+```kotlin
+@Serializable
+data class WeatherArgs(
+    val location: String,
+    val units: String = "celsius"
+)
+
+class WeatherTool : Tool<WeatherArgs, String>(
+    argsSerializer = serializer(),
+    resultSerializer = String.serializer(),
+    name = "get_weather",
+    description = "Gets current weather"
+) {
+    // Descriptor is automatically generated from WeatherArgs serializer
+    // name: "get_weather"
+    // description: "Gets current weather"
+    // requiredParameters: [location]
+    // optionalParameters: [units]
+    
+    override suspend fun execute(args: WeatherArgs): String {
+        // Implementation
+    }
+}
+```
+
+### Custom Descriptor Modification
+
+```kotlin
+class CustomTool : Tool<Args, Result> {
+    init {
+        // Modify the auto-generated descriptor
+        val customDescriptor = descriptor.copy(
+            description = "Enhanced: ${descriptor.description}",
+            requiredParameters = descriptor.requiredParameters.map { param ->
+                param.copy(
+                    description = "[Required] ${param.description}"
+                )
+            }
+        )
+    }
+}
+```
+
+## Best Practices
+
+<Note>
+  **Descriptor Design**
+  
+  - Write clear, specific descriptions that help the LLM understand usage
+  - Use snake_case for parameter names
+  - Mark parameters as optional only if they truly have sensible defaults
+  - Provide enum values when parameters have limited valid options
+  - Use object types for complex, related parameters
+  - Include units or formats in descriptions (e.g., "temperature in celsius")
+</Note>
+
+<Warning>
+  **Common Mistakes**
+  
+  - Forgetting to mark genuinely required parameters
+  - Using ambiguous parameter names
+  - Overly complex nested object structures
+  - Missing or vague descriptions
+  - Not using enums when values are constrained
+</Warning>
+
+## LLM Integration
+
+Descriptors are converted to LLM-specific formats:
+
+```kotlin
+// OpenAI function calling format
+val openAIFunction = descriptor.toOpenAIFunction()
+
+// Anthropic tool use format
+val anthropicTool = descriptor.toAnthropicTool()
+
+// Generic JSON schema
+val jsonSchema = descriptor.toJsonSchema()
+```
+
+## Testing
+
+```kotlin
+@Test
+fun testToolDescriptor() {
+    val tool = CalculatorTool()
+    val descriptor = tool.descriptor
+    
+    assertEquals("calculator", descriptor.name)
+    assertEquals(3, descriptor.requiredParameters.size)
+    assertTrue(
+        descriptor.requiredParameters.any { it.name == "operation" }
+    )
+}
+```
+
+## Related Types
+
+- [Tool](/api/tool) - Uses ToolDescriptor to describe its interface
+- [ToolRegistry](/api/tool-registry) - Stores tools with their descriptors
+- [PromptExecutor](/api/prompt-executor) - Passes descriptors to LLMs
+
+## Source Reference
+
+Defined in: 
+- `agents-tools/src/commonMain/kotlin/ai/koog/agents/core/tools/ToolDescriptor.kt`
+- `agents-tools/src/commonMain/kotlin/ai/koog/agents/core/tools/ToolDescriptors.kt` (ToolParameterDescriptor and ToolParameterType)

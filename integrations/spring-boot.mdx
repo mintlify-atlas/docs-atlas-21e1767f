@@ -1,0 +1,507 @@
+---
+title: Spring Boot Integration
+description: Auto-configuration and dependency injection for Koog agents in Spring Boot applications
+---
+
+The Spring Boot starter provides seamless integration between Koog AI agents and Spring Boot applications with auto-configuration, dependency injection, and configuration properties support.
+
+## Overview
+
+The `koog-spring-boot-starter` module provides:
+
+- **Auto-configuration**: Automatic setup for LLM clients
+- **Configuration Properties**: Easy setup through application.properties/yml
+- **Conditional Beans**: Beans created only when configured
+- **Dependency Injection**: Ready-to-use `SingleLLMPromptExecutor` beans
+- **Multi-provider Support**: OpenAI, Anthropic, Google, MistralAI, OpenRouter, DeepSeek, Ollama
+
+**Why use the Spring Boot starter?**
+
+- **Zero Boilerplate**: No manual client configuration
+- **Spring Native**: Works with Spring's DI and configuration system
+- **Production Ready**: Follows Spring Boot best practices
+- **Multiple Providers**: Configure multiple LLM providers simultaneously
+- **Type Safe**: Full Kotlin type safety and null-safety
+
+## Installation
+
+Add the Spring Boot starter dependency:
+
+```kotlin gradle
+dependencies {
+    implementation("ai.koog:koog-spring-boot-starter:$koogVersion")
+}
+```
+
+## Configuration
+
+### Application Properties
+
+Configure one or more LLM providers in your `application.properties`:
+
+```properties
+# Anthropic configuration
+ai.koog.anthropic.api-key=your-anthropic-api-key
+ai.koog.anthropic.base-url=https://api.anthropic.com
+
+# OpenAI configuration
+ai.koog.openai.api-key=your-openai-api-key
+ai.koog.openai.base-url=https://api.openai.com
+
+# Google configuration
+ai.koog.google.api-key=your-google-api-key
+ai.koog.google.base-url=https://generativelanguage.googleapis.com
+
+# MistralAI configuration
+ai.koog.mistral.api-key=your-mistral-api-key
+ai.koog.mistral.base-url=https://api.mistral.ai
+
+# Ollama configuration (local)
+ai.koog.ollama.base-url=http://localhost:11434
+
+# OpenRouter configuration
+ai.koog.openrouter.api-key=your-openrouter-api-key
+ai.koog.openrouter.base-url=https://openrouter.ai
+
+# DeepSeek configuration
+ai.koog.deepseek.api-key=your-deepseek-api-key
+ai.koog.deepseek.base-url=https://api.deepseek.com
+```
+
+**Source**: `koog-spring-boot-starter/Module.md:24`
+
+### YAML Configuration
+
+Or use YAML format in `application.yml`:
+
+```yaml
+ai:
+  koog:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY}
+      base-url: https://api.anthropic.com
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      base-url: https://api.openai.com
+    google:
+      api-key: ${GOOGLE_API_KEY}
+      base-url: https://generativelanguage.googleapis.com
+    ollama:
+      base-url: http://localhost:11434
+```
+
+### Environment Variables
+
+Use environment variables for secure credential management:
+
+```properties
+ai.koog.openai.api-key=${OPENAI_API_KEY}
+ai.koog.anthropic.api-key=${ANTHROPIC_API_KEY}
+```
+
+## Basic Usage
+
+### Service with Dependency Injection
+
+Inject auto-configured executors into your services:
+
+```kotlin
+import ai.koog.prompt.executor.model.PromptExecutor
+import ai.koog.prompt.dsl.prompt
+import org.springframework.stereotype.Service
+
+@Service
+class MyAIService(
+    private val anthropicExecutor: SingleLLMPromptExecutor,
+    private val openAIExecutor: SingleLLMPromptExecutor
+) {
+    
+    suspend fun processWithAnthropic(input: String): String {
+        val prompt = prompt("request-id") {
+            user(input)
+        }
+        
+        val result = anthropicExecutor.execute(prompt)
+        return result.text
+    }
+    
+    suspend fun processWithOpenAI(input: String): String {
+        val prompt = prompt("request-id") {
+            user(input)
+        }
+        
+        val result = openAIExecutor.execute(prompt)
+        return result.text
+    }
+}
+```
+
+**Source**: `koog-spring-boot-starter/Module.md:72`
+
+### REST Controller Example
+
+Use agents in Spring Web controllers:
+
+```kotlin
+import org.springframework.web.bind.annotation.*
+import org.springframework.http.ResponseEntity
+import org.springframework.http.HttpStatus
+
+@RestController
+@RequestMapping("/api/chat")
+class ChatController(
+    private val anthropicExecutor: SingleLLMPromptExecutor?
+) {
+    
+    @PostMapping
+    suspend fun chat(@RequestBody message: String): ResponseEntity<String> {
+        return if (anthropicExecutor != null) {
+            val response = anthropicExecutor.execute(
+                prompt("chat-request") {
+                    user(message)
+                }
+            )
+            ResponseEntity.ok(response.text)
+        } else {
+            ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body("AI service not configured")
+        }
+    }
+}
+```
+
+**Source**: `koog-spring-boot-starter/Module.md:99`
+
+## Advanced Usage
+
+### Multiple Provider Configuration
+
+Use multiple LLM providers with qualifier annotations:
+
+```kotlin
+import org.springframework.beans.factory.annotation.Qualifier
+
+@Service
+class MultiProviderService(
+    @Qualifier("anthropic") private val anthropicExecutor: SingleLLMPromptExecutor,
+    @Qualifier("openai") private val openAIExecutor: SingleLLMPromptExecutor,
+    @Qualifier("google") private val googleExecutor: SingleLLMPromptExecutor
+) {
+    suspend fun compareResponses(prompt: String): Map<String, String> {
+        return mapOf(
+            "anthropic" to anthropicExecutor.execute(prompt("id") { user(prompt) }).text,
+            "openai" to openAIExecutor.execute(prompt("id") { user(prompt) }).text,
+            "google" to googleExecutor.execute(prompt("id") { user(prompt) }).text
+        )
+    }
+}
+```
+
+### Agent Service with Persistence
+
+Combine with Spring Data for persistent agent sessions:
+
+```kotlin
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.snapshot.feature.Persistence
+import org.springframework.stereotype.Service
+
+@Service
+class KoogAgentService(
+    private val promptExecutor: PromptExecutor,
+    private val checkpointStorage: AgentCheckpointStorage
+) {
+    
+    fun createAgent(userId: String): AIAgent<String, Result> {
+        return AIAgent(
+            promptExecutor = promptExecutor,
+            llmModel = OpenAIModels.Chat.GPT4o,
+            toolRegistry = ToolRegistry {
+                // Register tools
+            },
+            strategy = yourStrategy()
+        ) {
+            install(Persistence) {
+                storage = checkpointStorage
+                enableAutomaticPersistence = true
+            }
+        }
+    }
+    
+    suspend fun runAgent(userId: String, query: String): Result {
+        val agent = createAgent(userId)
+        return agent.run(query)
+    }
+}
+```
+
+**Source**: `examples/devoxx-belgium-2025/src/main/kotlin/ai/koog/spring/sandwich/agents/KoogAgentService.kt:33`
+
+### OpenTelemetry Integration
+
+Combine with Spring Boot's observability features:
+
+```kotlin
+import ai.koog.agents.features.opentelemetry.feature.OpenTelemetry
+import io.opentelemetry.sdk.trace.export.SpanExporter
+import org.springframework.boot.info.BuildProperties
+
+@Service
+class ObservableAgentService(
+    private val promptExecutor: PromptExecutor,
+    private val spanExporters: List<SpanExporter>,
+    private val buildProps: BuildProperties
+) {
+    
+    fun createAgent(): AIAgent<String, String> {
+        return AIAgent(
+            promptExecutor = promptExecutor,
+            llmModel = OpenAIModels.Chat.GPT4o,
+            toolRegistry = toolRegistry
+        ) {
+            install(OpenTelemetry) {
+                setServiceInfo(
+                    serviceName = buildProps.name!!, 
+                    serviceVersion = buildProps.version!!
+                )
+                setVerbose(true)
+                spanExporters.forEach { addSpanExporter(it) }
+            }
+        }
+    }
+}
+```
+
+**Source**: `examples/devoxx-belgium-2025/src/main/kotlin/ai/koog/spring/sandwich/agents/KoogAgentService.kt:58`
+
+## Testing
+
+### Test Configuration
+
+Mock executors in test configurations:
+
+```kotlin
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Primary
+import io.mockk.mockk
+
+@TestConfiguration
+class TestKoogConfig {
+    @Bean
+    @Primary
+    fun mockLLMExecutor(): SingleLLMPromptExecutor {
+        return mockk<SingleLLMPromptExecutor>()
+    }
+}
+```
+
+**Source**: `koog-spring-boot-starter/Module.md:60`
+
+### Integration Tests
+
+Test with real executors using test properties:
+
+```kotlin
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.test.context.TestPropertySource
+import org.junit.jupiter.api.Test
+
+@SpringBootTest
+@TestPropertySource(properties = [
+    "ai.koog.openai.api-key=test-key",
+    "ai.koog.openai.base-url=http://localhost:8080"
+])
+class AgentIntegrationTest(
+    private val aiService: MyAIService
+) {
+    @Test
+    suspend fun `test agent execution`() {
+        val result = aiService.processWithOpenAI("Hello")
+        assertNotNull(result)
+    }
+}
+```
+
+### Unit Tests with MockK
+
+Unit test services with mocked dependencies:
+
+```kotlin
+import io.mockk.coEvery
+import io.mockk.mockk
+import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
+
+class MyAIServiceTest {
+    @Test
+    fun `test processWithAnthropic`() = runTest {
+        val mockExecutor = mockk<SingleLLMPromptExecutor>()
+        coEvery { mockExecutor.execute(any()) } returns mockk {
+            every { text } returns "Test response"
+        }
+        
+        val service = MyAIService(mockExecutor, mockExecutor)
+        val result = service.processWithAnthropic("Test input")
+        
+        assertEquals("Test response", result)
+    }
+}
+```
+
+## Auto-configuration Details
+
+### Conditional Bean Creation
+
+Beans are created only when configuration is present:
+
+```kotlin
+// Anthropic executor created only if ai.koog.anthropic.api-key is set
+@Bean
+@ConditionalOnProperty("ai.koog.anthropic.api-key")
+fun anthropicExecutor(): SingleLLMPromptExecutor
+
+// OpenAI executor created only if ai.koog.openai.api-key is set
+@Bean
+@ConditionalOnProperty("ai.koog.openai.api-key")
+fun openAIExecutor(): SingleLLMPromptExecutor
+```
+
+### Configuration Properties Classes
+
+Type-safe configuration with validation:
+
+```kotlin
+@ConfigurationProperties(prefix = "ai.koog.openai")
+data class OpenAIProperties(
+    val apiKey: String,
+    val baseUrl: String = "https://api.openai.com",
+    val timeout: TimeoutProperties = TimeoutProperties()
+)
+
+data class TimeoutProperties(
+    val requestTimeoutMillis: Long = 30000,
+    val connectTimeoutMillis: Long = 10000,
+    val socketTimeoutMillis: Long = 30000
+)
+```
+
+## Configuration Reference
+
+### Common Properties
+
+All providers support these properties:
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `api-key` | String | Yes* | - | API key for authentication |
+| `base-url` | String | No | Provider default | Base URL for API endpoint |
+
+*Not required for Ollama (local)
+
+### Provider-specific Properties
+
+#### Anthropic
+
+```properties
+ai.koog.anthropic.api-key=sk-ant-...
+ai.koog.anthropic.base-url=https://api.anthropic.com
+```
+
+#### OpenAI
+
+```properties
+ai.koog.openai.api-key=sk-...
+ai.koog.openai.base-url=https://api.openai.com
+```
+
+#### Google Gemini
+
+```properties
+ai.koog.google.api-key=AIza...
+ai.koog.google.base-url=https://generativelanguage.googleapis.com
+```
+
+#### Ollama (Local)
+
+```properties
+ai.koog.ollama.base-url=http://localhost:11434
+```
+
+## Best Practices
+
+1. **Use Environment Variables**: Never commit API keys
+   ```properties
+   ai.koog.openai.api-key=${OPENAI_API_KEY}
+   ```
+
+2. **Profile-specific Configuration**: Different configs per environment
+   ```yaml
+   # application-dev.yml
+   ai.koog.ollama.base-url: http://localhost:11434
+   
+   # application-prod.yml
+   ai.koog.openai.api-key: ${OPENAI_API_KEY}
+   ```
+
+3. **Nullable Injection**: Handle optional providers
+   ```kotlin
+   @Service
+   class MyService(
+       private val executor: SingleLLMPromptExecutor?
+   ) {
+       suspend fun process(input: String): String? {
+           return executor?.execute(prompt { user(input) })?.text
+       }
+   }
+   ```
+
+4. **Health Checks**: Monitor LLM availability
+   ```kotlin
+   @Component
+   class LLMHealthIndicator(
+       private val executor: SingleLLMPromptExecutor?
+   ) : HealthIndicator {
+       override fun health(): Health {
+           return if (executor != null) {
+               Health.up().build()
+           } else {
+               Health.down().withDetail("reason", "No LLM configured").build()
+           }
+       }
+   }
+   ```
+
+## Common Use Cases
+
+1. **REST APIs**: AI-powered endpoints
+2. **Scheduled Jobs**: Batch processing with agents
+3. **Event-driven Processing**: React to Spring events with agents
+4. **Microservices**: Agent-powered business logic
+5. **Admin Tools**: Internal agent-powered tools
+
+## Platform Support
+
+- **JVM**: Full support
+- **Spring Boot**: 3.x recommended
+- **Kotlin**: 1.9+ recommended
+
+## Examples
+
+See complete examples in the repository:
+
+```bash
+./gradlew :examples:spring-boot-kotlin:bootRun
+./gradlew :examples:devoxx-belgium-2025:bootRun
+```
+
+**Source**: `examples/spring-boot-kotlin/` and `examples/devoxx-belgium-2025/`
+
+## Next Steps
+
+- Learn about [Ktor integration](/integrations/ktor) for lightweight web services
+- Explore [Model Context Protocol](/integrations/model-context-protocol) for tool integration
+- See [RAG capabilities](/integrations/rag) for document-based agents
+- Check out [complete examples](/examples/spring-boot)

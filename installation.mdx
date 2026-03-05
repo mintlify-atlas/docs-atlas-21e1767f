@@ -1,0 +1,517 @@
+---
+title: "Installation"
+description: "Add Koog to your Kotlin project using Gradle or Maven"
+icon: "download"
+---
+
+## Requirements
+
+Before installing Koog, ensure your environment meets these requirements:
+
+<CardGroup cols={2}>
+  <Card title="JDK 17+" icon="java">
+    JDK 17 or higher is required for JVM targets
+  </Card>
+  <Card title="Kotlin 2.2+" icon="code">
+    Koog is built with Kotlin 2.3.10
+  </Card>
+  <Card title="Coroutines 1.10.2" icon="arrows-spin">
+    kotlinx-coroutines 1.10.2 must be set explicitly
+  </Card>
+  <Card title="Serialization 1.8.1+" icon="brackets-curly">
+    kotlinx-serialization 1.10.0 is recommended
+  </Card>
+</CardGroup>
+
+<Warning>
+  **Important**: If you have an existing Kotlin project, you must explicitly set `kotlinx-coroutines` version to `1.10.2` and `kotlinx-serialization` to `1.10.0` or higher to avoid compatibility issues.
+</Warning>
+
+## Supported Platforms
+
+Koog supports the following Kotlin Multiplatform targets:
+
+- **JVM**: Full support for Java 17+
+- **JavaScript**: Browser and Node.js
+- **WasmJS**: WebAssembly for browsers
+- **iOS**: Native iOS applications
+- **Android**: Android applications (via JVM)
+
+## Installation Methods
+
+<Tabs>
+  <Tab title="Gradle (Kotlin DSL)">
+    ### Step 1: Add Dependencies
+
+    Add Koog to your `build.gradle.kts` file:
+
+    ```kotlin build.gradle.kts
+    dependencies {
+        implementation("ai.koog:koog-agents:0.7.0")
+    }
+    ```
+
+    ### Step 2: Configure Repositories
+
+    Ensure you have Maven Central in your repositories:
+
+    ```kotlin build.gradle.kts
+    repositories {
+        mavenCentral()
+    }
+    ```
+
+    ### Step 3: Set Kotlin Versions
+
+    Explicitly configure the required kotlinx library versions:
+
+    ```kotlin build.gradle.kts
+    dependencies {
+        implementation("ai.koog:koog-agents:0.7.0")
+        
+        // Required versions
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
+    }
+    ```
+
+    ### Complete Example
+
+    Here's a complete `build.gradle.kts` for a JVM project:
+
+    ```kotlin build.gradle.kts
+    plugins {
+        kotlin("jvm") version "2.3.10"
+        kotlin("plugin.serialization") version "2.3.10"
+        application
+    }
+
+    group = "com.example"
+    version = "1.0-SNAPSHOT"
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        // Koog framework
+        implementation("ai.koog:koog-agents:0.7.0")
+        
+        // Required kotlinx libraries
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
+        
+        // Logging (optional but recommended)
+        implementation("io.github.oshai:kotlin-logging:7.0.7")
+        implementation("ch.qos.logback:logback-classic:1.5.13")
+    }
+
+    kotlin {
+        jvmToolchain(17)
+    }
+
+    application {
+        mainClass.set("com.example.MainKt")
+    }
+    ```
+  </Tab>
+
+  <Tab title="Gradle (Groovy)">
+    ### Step 1: Add Dependencies
+
+    Add Koog to your `build.gradle` file:
+
+    ```groovy build.gradle
+    dependencies {
+        implementation 'ai.koog:koog-agents:0.7.0'
+    }
+    ```
+
+    ### Step 2: Configure Repositories
+
+    Ensure you have Maven Central in your repositories:
+
+    ```groovy build.gradle
+    repositories {
+        mavenCentral()
+    }
+    ```
+
+    ### Step 3: Set Kotlin Versions
+
+    Explicitly configure the required kotlinx library versions:
+
+    ```groovy build.gradle
+    dependencies {
+        implementation 'ai.koog:koog-agents:0.7.0'
+        
+        // Required versions
+        implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2'
+        implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0'
+    }
+    ```
+
+    ### Complete Example
+
+    Here's a complete `build.gradle` for a JVM project:
+
+    ```groovy build.gradle
+    plugins {
+        id 'org.jetbrains.kotlin.jvm' version '2.3.10'
+        id 'org.jetbrains.kotlin.plugin.serialization' version '2.3.10'
+        id 'application'
+    }
+
+    group = 'com.example'
+    version = '1.0-SNAPSHOT'
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        // Koog framework
+        implementation 'ai.koog:koog-agents:0.7.0'
+        
+        // Required kotlinx libraries
+        implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2'
+        implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0'
+        
+        // Logging (optional but recommended)
+        implementation 'io.github.oshai:kotlin-logging:7.0.7'
+        implementation 'ch.qos.logback:logback-classic:1.5.13'
+    }
+
+    kotlin {
+        jvmToolchain(17)
+    }
+
+    application {
+        mainClass = 'com.example.MainKt'
+    }
+    ```
+  </Tab>
+
+  <Tab title="Maven">
+    ### Step 1: Add Dependencies
+
+    Add Koog to your `pom.xml` file:
+
+    ```xml pom.xml
+    <dependency>
+        <groupId>ai.koog</groupId>
+        <artifactId>koog-agents-jvm</artifactId>
+        <version>0.7.0</version>
+    </dependency>
+    ```
+
+    ### Step 2: Configure Repositories
+
+    Ensure you have Maven Central in your repositories:
+
+    ```xml pom.xml
+    <repositories>
+        <repository>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+    </repositories>
+    ```
+
+    ### Step 3: Set Kotlin Versions
+
+    Add the required kotlinx library versions:
+
+    ```xml pom.xml
+    <dependencies>
+        <!-- Koog framework -->
+        <dependency>
+            <groupId>ai.koog</groupId>
+            <artifactId>koog-agents-jvm</artifactId>
+            <version>0.7.0</version>
+        </dependency>
+        
+        <!-- Required kotlinx libraries -->
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-coroutines-core-jvm</artifactId>
+            <version>1.10.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-serialization-json-jvm</artifactId>
+            <version>1.10.0</version>
+        </dependency>
+    </dependencies>
+    ```
+
+    ### Complete Example
+
+    Here's a complete `pom.xml` for a JVM project:
+
+    ```xml pom.xml
+    <?xml version="1.0" encoding="UTF-8"?>
+    <project xmlns="http://maven.apache.org/POM/4.0.0"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+        <modelVersion>4.0.0</modelVersion>
+
+        <groupId>com.example</groupId>
+        <artifactId>my-koog-project</artifactId>
+        <version>1.0-SNAPSHOT</version>
+
+        <properties>
+            <kotlin.version>2.3.10</kotlin.version>
+            <maven.compiler.source>17</maven.compiler.source>
+            <maven.compiler.target>17</maven.compiler.target>
+        </properties>
+
+        <repositories>
+            <repository>
+                <id>central</id>
+                <url>https://repo.maven.apache.org/maven2</url>
+            </repository>
+        </repositories>
+
+        <dependencies>
+            <!-- Koog framework -->
+            <dependency>
+                <groupId>ai.koog</groupId>
+                <artifactId>koog-agents-jvm</artifactId>
+                <version>0.7.0</version>
+            </dependency>
+            
+            <!-- Kotlin standard library -->
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib</artifactId>
+                <version>${kotlin.version}</version>
+            </dependency>
+            
+            <!-- Required kotlinx libraries -->
+            <dependency>
+                <groupId>org.jetbrains.kotlinx</groupId>
+                <artifactId>kotlinx-coroutines-core-jvm</artifactId>
+                <version>1.10.2</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlinx</groupId>
+                <artifactId>kotlinx-serialization-json-jvm</artifactId>
+                <version>1.10.0</version>
+            </dependency>
+            
+            <!-- Logging (optional but recommended) -->
+            <dependency>
+                <groupId>io.github.oshai</groupId>
+                <artifactId>kotlin-logging-jvm</artifactId>
+                <version>7.0.7</version>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-classic</artifactId>
+                <version>1.5.13</version>
+            </dependency>
+        </dependencies>
+
+        <build>
+            <plugins>
+                <plugin>
+                    <groupId>org.jetbrains.kotlin</groupId>
+                    <artifactId>kotlin-maven-plugin</artifactId>
+                    <version>${kotlin.version}</version>
+                    <executions>
+                        <execution>
+                            <id>compile</id>
+                            <phase>compile</phase>
+                            <goals>
+                                <goal>compile</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <jvmTarget>17</jvmTarget>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </build>
+    </project>
+    ```
+  </Tab>
+</Tabs>
+
+## Additional Modules
+
+Koog provides additional modules for specific functionality:
+
+### Spring Boot Integration
+
+For Spring Boot applications:
+
+```kotlin
+implementation("ai.koog:koog-spring-boot-starter:0.7.0")
+```
+
+### Ktor Integration
+
+For Ktor server applications:
+
+```kotlin
+implementation("ai.koog:koog-ktor:0.7.0")
+```
+
+### Feature Modules
+
+Install specific features as needed:
+
+```kotlin
+// Memory and chat history
+implementation("ai.koog:agents-features-memory:0.7.0")
+
+// SQL-based persistence
+implementation("ai.koog:agents-features-sql:0.7.0")
+
+// OpenTelemetry observability
+implementation("ai.koog:agents-features-opentelemetry:0.7.0")
+
+// Model Context Protocol (MCP)
+implementation("ai.koog:agents-mcp:0.7.0")
+
+// Agent Client Protocol (ACP)
+implementation("ai.koog:agents-features-acp:0.7.0")
+```
+
+## Verify Installation
+
+Create a simple test file to verify your installation:
+
+```kotlin Main.kt
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+suspend fun main() {
+    val apiKey = System.getenv("OPENAI_API_KEY")
+        ?: error("Set OPENAI_API_KEY environment variable")
+    
+    simpleOpenAIExecutor(apiKey).use { executor ->
+        val agent = AIAgent(
+            promptExecutor = executor,
+            systemPrompt = "You are a helpful assistant.",
+            llmModel = OpenAIModels.Chat.GPT4oMini
+        )
+        
+        val result = agent.run("Say hello!")
+        println(result)
+    }
+}
+```
+
+Run the file:
+
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+./gradlew run
+```
+
+If everything is set up correctly, you should see a response from the AI agent!
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Coroutines version conflict">
+    If you see errors like `kotlin.coroutines.jvm.internal.BaseContinuationImpl`, ensure you're using kotlinx-coroutines version 1.10.2:
+
+    ```kotlin
+    dependencies {
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    }
+    ```
+
+    For Maven:
+
+    ```xml
+    <dependency>
+        <groupId>org.jetbrains.kotlinx</groupId>
+        <artifactId>kotlinx-coroutines-core-jvm</artifactId>
+        <version>1.10.2</version>
+    </dependency>
+    ```
+  </Accordion>
+
+  <Accordion title="Serialization errors">
+    Make sure you have the Kotlin serialization plugin enabled:
+
+    **Gradle:**
+    ```kotlin
+    plugins {
+        kotlin("plugin.serialization") version "2.3.10"
+    }
+    ```
+
+    **Maven:**
+    ```xml
+    <compilerPlugins>
+        <plugin>kotlinx-serialization</plugin>
+    </compilerPlugins>
+    ```
+  </Accordion>
+
+  <Accordion title="JVM target mismatch">
+    Koog requires JDK 17+. Configure your Kotlin JVM target:
+
+    **Gradle:**
+    ```kotlin
+    kotlin {
+        jvmToolchain(17)
+    }
+    ```
+
+    **Maven:**
+    ```xml
+    <configuration>
+        <jvmTarget>17</jvmTarget>
+    </configuration>
+    ```
+  </Accordion>
+
+  <Accordion title="Module not found">
+    If you can't find Koog modules, verify that Maven Central is in your repositories:
+
+    **Gradle:**
+    ```kotlin
+    repositories {
+        mavenCentral()
+    }
+    ```
+
+    **Maven:**
+    ```xml
+    <repositories>
+        <repository>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+    </repositories>
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Now that Koog is installed, you're ready to build your first agent:
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Tutorial" icon="rocket" href="/quickstart">
+    Build a complete working agent in 5 minutes
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/agents">
+    Learn about agents, tools, and strategies
+  </Card>
+  <Card title="LLM Providers" icon="brain" href="/llm-providers/overview">
+    Configure OpenAI, Anthropic, Google, and more
+  </Card>
+  <Card title="Examples" icon="code" href="/examples/overview">
+    Explore real-world examples and patterns
+  </Card>
+</CardGroup>

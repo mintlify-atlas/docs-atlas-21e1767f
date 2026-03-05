@@ -1,0 +1,531 @@
+---
+title: 'Building a Code Agent'
+description: 'A progressive, 5-step tutorial for building a production-ready coding agent'
+icon: 'terminal'
+---
+
+This tutorial walks you through building a production-grade code agent in five progressive steps, from a minimal implementation to a sophisticated agent with sub-agents and history compression.
+
+Based on the JetBrains blog series: [Building AI Agents in Kotlin](https://blog.jetbrains.com/ai/)
+
+## What You'll Build
+
+By the end of this tutorial, you'll have a coding agent that can:
+- Navigate and understand codebases
+- Make targeted code changes
+- Execute shell commands and tests
+- Search for code intelligently using sub-agents
+- Manage conversation history efficiently
+- Export traces to observability platforms
+
+## Prerequisites
+
+- Java 17+
+- OpenAI API key
+- Anthropic API key (for Step 5)
+- Basic understanding of Kotlin
+
+## Tutorial Overview
+
+<Steps>
+  <Step title="Step 1: Minimal Agent" icon="1">
+    Build a basic agent with file operations (list, read, edit)
+  </Step>
+  
+  <Step title="Step 2: Add Execution Tool" icon="2">
+    Add shell command execution for running tests
+  </Step>
+  
+  <Step title="Step 3: Add Observability" icon="3">
+    Integrate OpenTelemetry and Langfuse for tracing
+  </Step>
+  
+  <Step title="Step 4: Add Sub-Agent" icon="4">
+    Create a specialized "Find" agent for code search
+  </Step>
+  
+  <Step title="Step 5: History Compression" icon="5">
+    Implement smart history compression for long conversations
+  </Step>
+</Steps>
+
+---
+
+## Step 1: Minimal Agent
+
+Create a basic agent that can navigate a codebase and make simple edits.
+
+<Note>
+  **Blog Post**: [Building AI Agents in Kotlin – Part 1: A Minimal Coding Agent](https://blog.jetbrains.com/ai/2025/11/building-ai-agents-in-kotlin-part-1-a-minimal-coding-agent/)
+</Note>
+
+### Tools Provided
+
+- **ListDirectoryTool**: Browse directory structure
+- **ReadFileTool**: Read file contents
+- **EditFileTool**: Make targeted file edits
+
+### Complete Code
+
+```kotlin step-01-minimal-agent/src/main/kotlin/Main.kt
+package ai.koog.agents.examples.codeagent.step01
+
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.agent.singleRunStrategy
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.ext.tool.file.EditFileTool
+import ai.koog.agents.ext.tool.file.ListDirectoryTool
+import ai.koog.agents.ext.tool.file.ReadFileTool
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.rag.base.files.JVMFileSystemProvider
+
+val executor = simpleOpenAIExecutor(System.getenv("OPENAI_API_KEY"))
+val agent = AIAgent(
+    promptExecutor = executor,
+    llmModel = OpenAIModels.Chat.GPT5Codex,
+    toolRegistry = ToolRegistry {
+        tool(ListDirectoryTool(JVMFileSystemProvider.ReadOnly))
+        tool(ReadFileTool(JVMFileSystemProvider.ReadOnly))
+        tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+    },
+    systemPrompt = """
+        You are a highly skilled programmer tasked with updating the provided codebase according to the given task.
+        Your goal is to deliver production-ready code changes that integrate seamlessly with the existing codebase and solve given task.
+    """.trimIndent(),
+
+    strategy = singleRunStrategy(),
+    maxIterations = 100
+) {
+    handleEvents {
+        onToolCallStarting { ctx ->
+            println(
+                "Tool '${ctx.toolName}' called with args:" +
+                    " ${ctx.toolArgs.toString().take(100)}"
+            )
+        }
+    }
+}
+
+suspend fun main(args: Array<String>) {
+    if (args.size < 2) {
+        println("Error: Please provide the project absolute path and a task as arguments")
+        println("Usage: <absolute_path> <task>")
+        return
+    }
+
+    val (path, task) = args
+    val input = "Project absolute path: $path\n\n## Task\n$task"
+    try {
+        val result = agent.run(input)
+        println(result)
+    } finally {
+        executor.close()
+    }
+}
+```
+
+### Key Concepts
+
+1. **File System Provider**: `JVMFileSystemProvider.ReadOnly` vs `ReadWrite` controls file access permissions
+2. **Single Run Strategy**: The agent runs until completion without intermediate checkpoints
+3. **Tool Registry**: Declarative tool registration with type safety
+4. **Event Handling**: Observe tool calls in real-time
+
+### Run It
+
+```bash
+cd examples/code-agent/step-01-minimal-agent
+./gradlew run --args="/path/to/project 'Add error handling'"
+```
+
+---
+
+## Step 2: Add Execution Tool
+
+Extend the agent with shell command execution for running tests and validating changes.
+
+### New Capability: Shell Commands
+
+Add `ExecuteShellCommandTool` with safety confirmation:
+
+```kotlin step-02-add-execution-tool/src/main/kotlin/Main.kt
+val agent = AIAgent(
+    promptExecutor = executor,
+    llmModel = OpenAIModels.Chat.GPT5Codex,
+    toolRegistry = ToolRegistry {
+        tool(ListDirectoryTool(JVMFileSystemProvider.ReadOnly))
+        tool(ReadFileTool(JVMFileSystemProvider.ReadOnly))
+        tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+        tool(createExecuteShellCommandToolFromEnv())  // NEW!
+    },
+    systemPrompt = """
+        You are a highly skilled programmer tasked with updating the provided codebase according to the given task.
+        Your goal is to deliver production-ready code changes that integrate seamlessly with the existing codebase and solve given task.
+        Ensure minimal possible changes done - that guarantees minimal impact on existing functionality.
+        
+        You have shell access to execute commands and run tests.
+        After investigation, define expected behavior with test scripts, then iterate on your implementation until the tests pass.
+        Verify your changes don't break existing functionality through regression testing, but prefer running targeted tests over full test suites.
+        Note: the codebase may be fully configured or freshly cloned with no dependencies installed - handle any necessary setup steps.
+    """.trimIndent(),
+    strategy = singleRunStrategy(),
+    maxIterations = 400  // Increased for test iterations
+)
+
+fun createExecuteShellCommandToolFromEnv(): ExecuteShellCommandTool {
+    return if (System.getenv("BRAVE_MODE")?.lowercase() == "true") {
+        // Auto-approve all commands (use with caution!)
+        ExecuteShellCommandTool(JvmShellCommandExecutor()) { _ -> ShellCommandConfirmation.Approved }
+    } else {
+        // Prompt user for confirmation
+        ExecuteShellCommandTool(JvmShellCommandExecutor(), PrintShellCommandConfirmationHandler())
+    }
+}
+```
+
+### Safety Features
+
+<Warning>
+  Shell command execution requires careful security consideration. The agent prompts for user confirmation before executing commands unless `BRAVE_MODE=true`.
+</Warning>
+
+**Confirmation Handler**: Each command is displayed to the user for approval before execution.
+
+### Run It
+
+```bash
+cd examples/code-agent/step-02-add-execution-tool
+
+# With confirmation prompts (safe)
+./gradlew run --args="/path/to/project 'Fix failing tests'"
+
+# Auto-approve mode (use carefully!)
+BRAVE_MODE=true ./gradlew run --args="/path/to/project 'Fix failing tests'"
+```
+
+---
+
+## Step 3: Add Observability
+
+Integrate OpenTelemetry and Langfuse for comprehensive agent tracing.
+
+### Install OpenTelemetry Feature
+
+```kotlin step-03-add-observability/src/main/kotlin/Main.kt
+val agent = AIAgent(
+    promptExecutor = executor,
+    llmModel = OpenAIModels.Chat.GPT5Codex,
+    toolRegistry = ToolRegistry {
+        tool(ListDirectoryTool(JVMFileSystemProvider.ReadOnly))
+        tool(ReadFileTool(JVMFileSystemProvider.ReadOnly))
+        tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+        tool(createExecuteShellCommandToolFromEnv())
+    },
+    systemPrompt = """...""".trimIndent(),
+    strategy = singleRunStrategy(),
+    maxIterations = 400
+) {
+    install(OpenTelemetry) {
+        setVerbose(true) // Send full strings instead of HIDDEN placeholders
+        addLangfuseExporter(
+            traceAttributes = listOf(
+                CustomAttribute("langfuse.session.id", System.getenv("LANGFUSE_SESSION_ID") ?: "")
+            )
+        )
+    }
+    handleEvents {
+        onToolCallStarting { ctx ->
+            println("Tool '${ctx.toolName}' called with args: ${ctx.toolArgs.toString().take(100)}")
+        }
+    }
+}
+```
+
+### What Gets Traced
+
+- All LLM requests and responses
+- Tool calls with arguments and results
+- Agent execution timeline
+- Token usage and costs
+- Error traces and stack traces
+
+### View Traces in Langfuse
+
+1. Set up a Langfuse account at [langfuse.com](https://langfuse.com)
+2. Configure environment variables:
+   ```bash
+   export LANGFUSE_PUBLIC_KEY=your_public_key
+   export LANGFUSE_SECRET_KEY=your_secret_key
+   export LANGFUSE_SESSION_ID=my_session_123
+   ```
+3. Run the agent - traces appear automatically in Langfuse UI
+
+### Run It
+
+```bash
+cd examples/code-agent/step-03-add-observability
+export LANGFUSE_SESSION_ID="my_session_$(date +%s)"
+./gradlew run --args="/path/to/project 'Refactor authentication'"
+```
+
+---
+
+## Step 4: Add Sub-Agent
+
+Create a specialized "Find" agent for intelligent code search, reducing costs and improving accuracy.
+
+### Why a Sub-Agent?
+
+The main agent's context is expensive. A specialized search agent:
+- Uses a smaller, cheaper model (GPT-4 Mini)
+- Focuses solely on finding code
+- Parallelizes searches efficiently
+- Returns focused results to the main agent
+
+### Find Agent Implementation
+
+```kotlin step-04-add-subagent/src/main/kotlin/FindAgent.kt
+val findAgent = AIAgent(
+    promptExecutor = simpleOpenAIExecutor(System.getenv("OPENAI_API_KEY")),
+    llmModel = OpenAIModels.Chat.GPT4_1Mini,
+    toolRegistry = ToolRegistry {
+        tool(ListDirectoryTool(JVMFileSystemProvider.ReadOnly))
+        tool(ReadFileTool(JVMFileSystemProvider.ReadOnly))
+        tool(RegexSearchTool(JVMFileSystemProvider.ReadOnly))  // NEW!
+    },
+    systemPrompt = """
+        You are an AI assistant specializing in code search.
+        Your task is to analyze the user's query and provide clear and specific result.
+        
+        Break down the query, identify what exactly needs to be found, and note any ambiguities or alternative interpretations.
+        If the query is ambiguous or could be improved, provide at least one result for each possible interpretation.
+        
+        Prioritize accuracy and relevance in your search results.
+        * For each result, provide a clear and concise explanation of why it was selected.
+        * The explanation should state the specific criteria that led to its selection.
+        * If the match is partial or inferred, clearly state the limitations and potential inaccuracies.
+        * Ensure to include only relevant snippets in the results.
+        
+        Ensure to utilize maximum amount of parallelization during the tool calling.
+    """.trimIndent(),
+    strategy = singleRunStrategy(),
+    maxIterations = 100
+) {
+    setupObservability(agentName = "findAgent")
+}
+
+fun createFindAgentTool(): Tool<*, *> {
+    return AIAgentService
+        .fromAgent(findAgent as GraphAIAgent<String, String>)
+        .createAgentTool<String, String>(
+            agentName = "__find_in_codebase_agent__",
+            agentDescription = """
+                This tool is powered by an intelligent micro agent that analyzes and understands code context to find specific elements in your codebase.
+                Unlike simple text search (ctrl+F), it intelligently interprets your query to locate classes, functions, variables, or files that best match your intent.
+                It requires a detailed query describing what to search for, why you need this information, and an absolute path defining the search scope.
+            """.trimIndent(),
+            inputDescription = """
+                The input contains two components: the absolute_path and the query.
+                
+                ## Query
+                The query is a detailed search query for the intelligent agent to analyze.
+                
+                Examples of effective queries:
+                - Find all implementations of the `UserRepository` interface to understand how data persistence is handled across the application
+                - Locate files named `*Service.kt` containing `fun processOrder` because I need to modify the order processing logic
+                
+                ## absolute_path
+                The absolute file system path to the directory where the search should begin.
+                
+                ## Formatting
+                Provide the absolute_path and the query in this format: 'Absolute path for search scope: <absolute_path>\n\n## Query\n<query>'."
+            """.trimIndent()
+        )
+}
+```
+
+### Using the Find Agent
+
+Add to the main agent's tool registry:
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = executor,
+    llmModel = OpenAIModels.Chat.GPT5Codex,
+    toolRegistry = ToolRegistry {
+        tool(ListDirectoryTool(JVMFileSystemProvider.ReadOnly))
+        tool(ReadFileTool(JVMFileSystemProvider.ReadOnly))
+        tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+        tool(createExecuteShellCommandToolFromEnv())
+        tool(createFindAgentTool())  // Add the find agent as a tool!
+    },
+    systemPrompt = """
+        ...
+        
+        You also have an intelligent find micro agent at your disposition, which can help you find code components and other constructs 
+        more cheaply than you can do it yourself. Lean on it for any and all search operations. Do not use shell execution for find tasks.
+    """.trimIndent(),
+    ...
+)
+```
+
+### Run It
+
+```bash
+cd examples/code-agent/step-04-add-subagent
+./gradlew run --args="/path/to/project 'Find and update all payment processing functions'"
+```
+
+---
+
+## Step 5: History Compression
+
+Implement smart history compression for handling long conversations without context overflow.
+
+### The Problem
+
+Long coding sessions accumulate context:
+- File reads add thousands of tokens
+- Tool results pile up
+- Eventually hit model context limits
+- Performance degrades with large contexts
+
+### The Solution: History Compression
+
+```kotlin step-05-history/src/main/kotlin/Main.kt
+import ai.koog.agents.ext.agent.HistoryCompressionConfig
+import ai.koog.agents.ext.agent.singleRunStrategyWithHistoryCompression
+
+val agent = AIAgent(
+    promptExecutor = multiExecutor,
+    llmModel = AnthropicModels.Opus_4_6,
+    toolRegistry = ToolRegistry {
+        tool(ListDirectoryTool(JVMFileSystemProvider.ReadOnly))
+        tool(ReadFileTool(JVMFileSystemProvider.ReadOnly))
+        tool(EditFileTool(JVMFileSystemProvider.ReadWrite))
+        tool(createExecuteShellCommandToolFromEnv())
+        tool(createFindAgentTool())
+    },
+    systemPrompt = """...""".trimIndent(),
+    strategy = singleRunStrategyWithHistoryCompression(
+        config = HistoryCompressionConfig(
+            isHistoryTooBig = CODE_AGENT_HISTORY_TOO_BIG,
+            compressionStrategy = CODE_AGENT_COMPRESSION_STRATEGY,
+            retrievalModel = OpenAIModels.Chat.GPT4_1Mini
+        )
+    ),
+    maxIterations = 400
+)
+```
+
+### Compression Configuration
+
+```kotlin CodeAgentHistoryCompressionConfig.kt
+val CODE_AGENT_HISTORY_TOO_BIG: (HistoryCompressionState) -> Boolean = { state ->
+    // Compress when:
+    // - More than 100 messages OR
+    // - Estimated tokens > 50,000
+    state.historySize > 100 || state.estimatedTotalTokens > 50_000
+}
+
+val CODE_AGENT_COMPRESSION_STRATEGY: (HistoryCompressionState) -> List<HistoryMessage> = { state ->
+    val messages = state.history
+    
+    // Keep recent messages (last 20)
+    val recentMessages = messages.takeLast(20)
+    
+    // Summarize older messages using LLM
+    val olderMessages = messages.dropLast(20)
+    val summary = summarizeMessages(olderMessages)
+    
+    listOf(summary) + recentMessages
+}
+```
+
+### Multi-LLM Executor
+
+Step 5 uses multiple LLM providers for different tasks:
+
+```kotlin
+val multiExecutor = MultiLLMPromptExecutor(
+    LLMProvider.Anthropic to AnthropicLLMClient(System.getenv("ANTHROPIC_API_KEY")),
+    LLMProvider.OpenAI to OpenAILLMClient(System.getenv("OPENAI_API_KEY"))
+)
+
+val agent = AIAgent(
+    promptExecutor = multiExecutor,
+    llmModel = AnthropicModels.Opus_4_6,  // Main agent uses Anthropic
+    // ...
+    strategy = singleRunStrategyWithHistoryCompression(
+        config = HistoryCompressionConfig(
+            // ...
+            retrievalModel = OpenAIModels.Chat.GPT4_1Mini  // Compression uses OpenAI
+        )
+    )
+)
+```
+
+### Run It
+
+```bash
+cd examples/code-agent/step-05-history
+export ANTHROPIC_API_KEY=your_anthropic_key
+export OPENAI_API_KEY=your_openai_key
+./gradlew run --args="/path/to/project 'Large refactoring task'"
+```
+
+---
+
+## Complete Tutorial Summary
+
+<Steps>
+  <Step title="Step 1: Minimal Agent">
+    ✅ File operations (list, read, edit)
+    ✅ Basic agent structure
+    ✅ Event handling
+  </Step>
+  
+  <Step title="Step 2: Add Execution">
+    ✅ Shell command execution
+    ✅ Test-driven iteration
+    ✅ Safety confirmations
+  </Step>
+  
+  <Step title="Step 3: Observability">
+    ✅ OpenTelemetry integration
+    ✅ Langfuse tracing
+    ✅ Comprehensive monitoring
+  </Step>
+  
+  <Step title="Step 4: Sub-Agent">
+    ✅ Specialized search agent
+    ✅ Agent-as-tool pattern
+    ✅ Cost optimization
+  </Step>
+  
+  <Step title="Step 5: History Compression">
+    ✅ Smart context management
+    ✅ Multi-LLM executor
+    ✅ Long conversation support
+  </Step>
+</Steps>
+
+## Source Code
+
+<Card title="View on GitHub" icon="github" href="https://github.com/koogio/koog/tree/main/examples/code-agent">
+  Browse the complete source code for all five steps
+</Card>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Trip Planning Example" icon="map" href="/examples/trip-planning">
+    Explore advanced multi-API integration
+  </Card>
+  
+  <Card title="Agent Strategies" icon="diagram-project" href="/core-concepts/strategies">
+    Learn more about custom strategies
+  </Card>
+</CardGroup>

@@ -1,0 +1,861 @@
+---
+title: 'Spring Boot Integration'
+description: 'Production-ready Spring Boot application with Koog agents and REST API'
+icon: 'leaf'
+---
+
+Deploy Koog AI agents in a Spring Boot application with REST API endpoints, MCP server integration, and S3 persistence.
+
+## Overview
+
+This example demonstrates a production-ready Spring Boot application that:
+- Exposes agents via REST API
+- Integrates with MCP servers (GitHub example)
+- Supports S3 persistence for agent state
+- Configures agents via YAML
+- Uses Google's Gemini models
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="REST API" icon="cloud">
+    HTTP endpoints for chat interactions with full async support
+  </Card>
+  
+  <Card title="MCP Integration" icon="plug">
+    Connect to Model Context Protocol servers (GitHub, Google Maps, etc.)
+  </Card>
+  
+  <Card title="S3 Persistence" icon="database">
+    Optional agent state persistence to AWS S3
+  </Card>
+  
+  <Card title="YAML Configuration" icon="file-code">
+    Declarative agent and tool configuration
+  </Card>
+</CardGroup>
+
+## Quick Start
+
+<Steps>
+  <Step title="Prerequisites">
+    Ensure you have:
+    - Java 17 or higher
+    - Docker (for MCP servers)
+    - Gradle 8.14
+    - Google API key
+    - GitHub personal access token
+    - Optional: AWS credentials for S3 persistence
+  </Step>
+
+  <Step title="Set Environment Variables">
+    ```bash
+    export GOOGLE_API_KEY="your_google_key"
+    export GITHUB_PERSONAL_ACCESS_TOKEN="your_github_token"
+    
+    # Optional: for S3 persistence
+    export AWS_ACCESS_KEY_ID="your_aws_key"
+    export AWS_SECRET_ACCESS_KEY="your_aws_secret"
+    ```
+  </Step>
+
+  <Step title="Start Docker">
+    Docker is required for MCP server containers:
+    ```bash
+    docker ps  # Verify Docker is running
+    ```
+  </Step>
+
+  <Step title="Run the Application">
+    ```bash
+    cd examples/spring-boot-kotlin
+    ./gradlew bootRun
+    ```
+    
+    Application starts on `http://localhost:8080`
+  </Step>
+
+  <Step title="Test the API">
+    ```bash
+    curl -X POST http://localhost:8080/chat \
+      -H "Content-Type: application/json" \
+      -d '{"prompt": "List the last 3 commits in your_username/your_repo"}'
+    ```
+  </Step>
+</Steps>
+
+## Project Structure
+
+```
+spring-boot-kotlin/
+├── src/main/kotlin/com/example/agent/
+│   ├── SpringBootKotlinApplication.kt    # Main application
+│   ├── config/
+│   │   ├── AgentConfiguration.kt         # YAML config data classes
+│   │   └── AppConfiguration.kt           # Spring configuration
+│   ├── controller/
+│   │   └── ChatController.kt             # REST endpoint
+│   ├── model/
+│   │   └── Models.kt                     # Request/response models
+│   └── service/
+│       ├── AgentService.kt               # Agent creation logic
+│       ├── ToolRegistryProvider.kt       # Tool setup
+│       └── S3StorageProvider.kt          # S3 persistence
+├── src/main/resources/
+│   └── application.yml                   # Configuration
+└── build.gradle.kts
+```
+
+## Implementation
+
+### Main Application
+
+```kotlin SpringBootKotlinApplication.kt
+package com.example.agent
+
+import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.runApplication
+
+@SpringBootApplication
+class SpringBootKotlinApplication
+
+fun main(args: Array<String>) {
+    runApplication<SpringBootKotlinApplication>(*args)
+}
+```
+
+### REST Controller
+
+```kotlin ChatController.kt
+package com.example.agent.controller
+
+import com.example.agent.service.AgentService
+import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.http.HttpStatus
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ResponseStatusException
+
+private val logger = KotlinLogging.logger {}
+
+@RestController
+class ChatController(val agentService: AgentService) {
+
+    @PostMapping(value = ["/chat"])
+    suspend fun chat(@RequestBody request: ChatRequest): ChatResponse {
+        try {
+            val result = agentService.createAndRunAgent(request.prompt)
+            return ChatResponse(result)
+        } catch (e: Exception) {
+            logger.error(e) { "Failed to run an agent" }
+            throw ResponseStatusException(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Failed to run an agent"
+            )
+        }
+    }
+}
+
+data class ChatRequest(val prompt: String)
+data class ChatResponse(val response: String)
+```
+
+### Agent Service
+
+Creates and executes agents based on YAML configuration:
+
+```kotlin AgentService.kt
+package com.example.agent.service
+
+import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.agent.config.AIAgentConfig
+import ai.koog.agents.core.agent.singleRunStrategy
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+import ai.koog.agents.features.persistence.feature.S3Persistence
+import ai.koog.prompt.dsl.prompt
+import ai.koog.prompt.executor.clients.google.GoogleLLMClient
+import ai.koog.prompt.executor.clients.google.GoogleModels
+import com.example.agent.config.AgentConfiguration
+import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.stereotype.Service
+
+private val logger = KotlinLogging.logger {}
+
+@Service
+class AgentService(
+    private val agentConfiguration: AgentConfiguration,
+    private val toolRegistryProvider: ToolRegistryProvider,
+    private val s3StorageProvider: S3StorageProvider?
+) {
+    private val googleApiKey = System.getenv("GOOGLE_API_KEY")
+        ?: error("GOOGLE_API_KEY environment variable is not set")
+
+    suspend fun createAndRunAgent(userPrompt: String): String {
+        val executor = GoogleLLMClient(googleApiKey)
+        
+        // Build tool registry from configuration
+        val toolRegistry = toolRegistryProvider.createToolRegistry(
+            agentConfiguration.tools
+        )
+
+        // Create agent config
+        val agentConfig = AIAgentConfig(
+            prompt = prompt("chat-agent") {
+                agentConfiguration.systemPrompt?.let { system(it) }
+            },
+            model = GoogleModels.fromId(agentConfiguration.model.id),
+            maxAgentIterations = 100
+        )
+
+        // Create the agent
+        val agent = AIAgent(
+            promptExecutor = executor,
+            strategy = singleRunStrategy(),
+            agentConfig = agentConfig,
+            toolRegistry = toolRegistry
+        ) {
+            // Optional S3 persistence
+            if (s3StorageProvider != null && 
+                agentConfiguration.s3Persistence?.enabled == true) {
+                install(S3Persistence) {
+                    storageProvider = s3StorageProvider
+                }
+            }
+
+            handleEvents {
+                onToolCallStarting { ctx ->
+                    logger.info { "Tool called: ${ctx.toolName}" }
+                }
+                onAgentExecutionFailed { ctx ->
+                    logger.error(ctx.throwable) { "Agent execution failed" }
+                }
+            }
+        }
+
+        // Run the agent
+        return agent.run(userPrompt)
+    }
+}
+```
+
+### Tool Registry Provider
+
+Dynamically creates tool registries from YAML configuration:
+
+```kotlin ToolRegistryProvider.kt
+package com.example.agent.service
+
+import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.mcp.McpToolRegistryProvider
+import com.example.agent.config.AgentConfiguration.ToolDefinition
+import com.example.agent.config.AgentConfiguration.ToolType
+import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
+import kotlinx.coroutines.Dispatchers
+import org.springframework.stereotype.Component
+
+@Component
+class ToolRegistryProvider {
+    private val mcpTransports = mutableListOf<StdioClientTransport>()
+
+    suspend fun createToolRegistry(
+        toolDefinitions: List<ToolDefinition>
+    ): ToolRegistry {
+        var registry = ToolRegistry { }
+
+        for (toolDef in toolDefinitions) {
+            when (toolDef.type) {
+                ToolType.MCP -> {
+                    val mcpRegistry = createMcpToolRegistry(toolDef)
+                    registry += mcpRegistry
+                }
+                ToolType.SIMPLE -> {
+                    // Add custom simple tools here
+                }
+            }
+        }
+
+        return registry
+    }
+
+    private suspend fun createMcpToolRegistry(
+        toolDef: ToolDefinition
+    ): ToolRegistry {
+        val dockerImage = toolDef.options.dockerImage
+            ?: error("Docker image required for MCP tool ${toolDef.id}")
+
+        // Build docker command
+        val command = buildList {
+            add("docker")
+            add("run")
+            add("-i")
+            
+            // Add environment variables
+            toolDef.options.dockerOptions?.forEach { (key, value) ->
+                add("-e")
+                add("$key=$value")
+            }
+            
+            add(dockerImage)
+        }
+
+        // Start MCP server process
+        val process = ProcessBuilder(command)
+            .redirectInput(ProcessBuilder.Redirect.PIPE)
+            .redirectOutput(ProcessBuilder.Redirect.PIPE)
+            .start()
+
+        kotlinx.coroutines.delay(1000) // Wait for server to start
+
+        // Create transport
+        val transport = McpToolRegistryProvider.defaultStdioTransport(process)
+        mcpTransports.add(transport)
+
+        // Return tool registry
+        return McpToolRegistryProvider.fromTransport(transport)
+    }
+
+    fun cleanup() {
+        mcpTransports.forEach { it.close() }
+    }
+}
+```
+
+### S3 Storage Provider
+
+Implements agent state persistence to AWS S3:
+
+```kotlin S3StorageProvider.kt
+package com.example.agent.service
+
+import ai.koog.agents.features.persistence.StorageProvider
+import com.example.agent.config.AgentConfiguration
+import org.springframework.stereotype.Component
+import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.model.*
+
+@Component
+class S3StorageProvider(
+    private val agentConfiguration: AgentConfiguration
+) : StorageProvider {
+    private val s3Config = agentConfiguration.s3Persistence
+    private val s3Client: S3Client? = if (s3Config?.enabled == true) {
+        S3Client.builder()
+            .region(Region.of(s3Config.region))
+            .build()
+    } else null
+
+    override suspend fun save(key: String, data: ByteArray) {
+        val client = s3Client ?: return
+        val fullKey = "${s3Config?.path}/$key"
+        
+        client.putObject(
+            PutObjectRequest.builder()
+                .bucket(s3Config?.bucket)
+                .key(fullKey)
+                .build(),
+            RequestBody.fromBytes(data)
+        )
+    }
+
+    override suspend fun load(key: String): ByteArray? {
+        val client = s3Client ?: return null
+        val fullKey = "${s3Config?.path}/$key"
+        
+        return try {
+            client.getObject(
+                GetObjectRequest.builder()
+                    .bucket(s3Config?.bucket)
+                    .key(fullKey)
+                    .build()
+            ).readAllBytes()
+        } catch (e: NoSuchKeyException) {
+            null
+        }
+    }
+
+    override suspend fun delete(key: String) {
+        val client = s3Client ?: return
+        val fullKey = "${s3Config?.path}/$key"
+        
+        client.deleteObject(
+            DeleteObjectRequest.builder()
+                .bucket(s3Config?.bucket)
+                .key(fullKey)
+                .build()
+        )
+    }
+}
+```
+
+## Configuration
+
+### application.yml
+
+The agent is fully configured via YAML:
+
+```yaml application.yml
+agent:
+  version: "1.0.0"
+  name: "GitHub Assistant"
+  description: "AI agent that helps with GitHub operations"
+  
+  model:
+    id: "gemini-2.5-flash"
+    options:
+      temperature: 0.3
+  
+  system_prompt: |
+    You are a helpful GitHub assistant.
+    You can help users with repository operations, commit history, and more.
+    Use the available tools to access GitHub data.
+  
+  tools:
+    - type: MCP
+      id: "github"
+      options:
+        docker_image: "mcp/github"
+        docker_options:
+          GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+  
+  # Optional S3 persistence
+  s3_persistence:
+    enabled: false  # Set to true to enable
+    region: "us-east-1"
+    bucket: "my-agent-state-bucket"
+    path: "agents/github-assistant"
+```
+
+### Configuration Data Classes
+
+```kotlin AgentConfiguration.kt
+package com.example.agent.config
+
+import com.fasterxml.jackson.annotation.JsonProperty
+import org.springframework.boot.context.properties.ConfigurationProperties
+
+@ConfigurationProperties(prefix = "agent")
+data class AgentConfiguration(
+    val version: String,
+    val name: String,
+    val description: String,
+    val model: Model,
+    @field:JsonProperty("system_prompt")
+    val systemPrompt: String? = null,
+    val tools: List<ToolDefinition> = emptyList(),
+    val s3Persistence: S3Persistence? = null,
+) {
+    data class Model(
+        val id: String,
+        val options: ModelOptions? = null,
+    )
+
+    data class ModelOptions(
+        val temperature: Double? = null,
+    )
+
+    data class ToolDefinition(
+        val type: ToolType,
+        val id: String,
+        val options: ToolOptions = ToolOptions()
+    )
+
+    data class ToolOptions(
+        @field:JsonProperty("docker_image")
+        val dockerImage: String? = null,
+        @field:JsonProperty("docker_options")
+        val dockerOptions: Map<String, String>? = null,
+    )
+
+    data class S3Persistence(
+        @field:JsonProperty("enabled")
+        val enabled: Boolean,
+        @field:JsonProperty("region")
+        val region: String,
+        @field:JsonProperty("bucket")
+        val bucket: String,
+        @field:JsonProperty("path")
+        val path: String,
+    )
+
+    enum class ToolType {
+        SIMPLE, MCP
+    }
+}
+```
+
+## API Usage
+
+### Chat Endpoint
+
+**Endpoint:** `POST /chat`
+
+**Request:**
+```json
+{
+  "prompt": "List the last three commits in the repository username/repo-name and summarize them"
+}
+```
+
+**Response:**
+```json
+{
+  "response": "Here's a summary of the last three commits in the username/repo-name repository:\n\n1. **Create script.sh**: This commit created a shell script file named `script.sh`.\n2. **Initial commit**: This is the initial commit, likely setting up the basic structure of the repository.\n\n"
+}
+```
+
+### Using cURL
+
+```bash
+curl -v -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "List the last three commits in the GitHub repository your_username/your_repo and summarize them."
+  }' | jq
+```
+
+### Using HTTPie
+
+```bash
+http POST http://localhost:8080/chat \
+  prompt="What are the open issues in username/repo?"
+```
+
+## Supported Models
+
+The example uses Google's Gemini models. Supported models:
+
+- `gemini-2.0-flash`
+- `gemini-2.0-flash-001`
+- `gemini-2.0-flash-lite`
+- `gemini-2.0-flash-lite-001`
+- `gemini-2.5-pro`
+- `gemini-2.5-flash`
+- `gemini-2.5-flash-lite`
+
+Change the model in `application.yml`:
+
+```yaml
+agent:
+  model:
+    id: "gemini-2.5-pro"  # Use the most capable model
+    options:
+      temperature: 0.7
+```
+
+## MCP Server Integration
+
+### Available MCP Servers
+
+The application can integrate with any MCP server. Examples:
+
+<Tabs>
+  <Tab title="GitHub">
+    ```yaml
+    tools:
+      - type: MCP
+        id: "github"
+        options:
+          docker_image: "mcp/github"
+          docker_options:
+            GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+    ```
+    
+    **Capabilities:**
+    - List repositories
+    - Get commit history
+    - Search issues and PRs
+    - Create/update issues
+  </Tab>
+  
+  <Tab title="Google Maps">
+    ```yaml
+    tools:
+      - type: MCP
+        id: "google-maps"
+        options:
+          docker_image: "mcp/google-maps"
+          docker_options:
+            GOOGLE_MAPS_API_KEY: "${GOOGLE_MAPS_API_KEY}"
+    ```
+    
+    **Capabilities:**
+    - Search places
+    - Get directions
+    - Calculate distances
+    - Place details and reviews
+  </Tab>
+  
+  <Tab title="Slack">
+    ```yaml
+    tools:
+      - type: MCP
+        id: "slack"
+        options:
+          docker_image: "mcp/slack"
+          docker_options:
+            SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN}"
+    ```
+    
+    **Capabilities:**
+    - Send messages
+    - List channels
+    - Read message history
+    - Manage threads
+  </Tab>
+</Tabs>
+
+### Multiple MCP Servers
+
+Combine multiple MCP servers:
+
+```yaml
+tools:
+  - type: MCP
+    id: "github"
+    options:
+      docker_image: "mcp/github"
+      docker_options:
+        GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+  
+  - type: MCP
+    id: "jira"
+    options:
+      docker_image: "mcp/jira"
+      docker_options:
+        JIRA_URL: "${JIRA_URL}"
+        JIRA_API_TOKEN: "${JIRA_API_TOKEN}"
+```
+
+## S3 Persistence
+
+Enable state persistence to AWS S3 for long-running conversations:
+
+### Configuration
+
+```yaml
+agent:
+  s3_persistence:
+    enabled: true
+    region: "us-east-1"
+    bucket: "my-agent-state-bucket"
+    path: "agents/production"
+```
+
+### Environment Variables
+
+```bash
+export AWS_ACCESS_KEY_ID="your_aws_access_key"
+export AWS_SECRET_ACCESS_KEY="your_aws_secret_key"
+```
+
+### What Gets Persisted
+
+- Conversation history
+- Agent state and storage
+- Tool execution results
+- Session context
+
+## Production Deployment
+
+### Docker Deployment
+
+Create a Dockerfile:
+
+```dockerfile Dockerfile
+FROM eclipse-temurin:17-jdk-alpine
+WORKDIR /app
+
+COPY build/libs/*.jar app.jar
+
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+Build and run:
+
+```bash
+./gradlew bootJar
+docker build -t koog-agent .
+docker run -p 8080:8080 \
+  -e GOOGLE_API_KEY=your_key \
+  -e GITHUB_PERSONAL_ACCESS_TOKEN=your_token \
+  koog-agent
+```
+
+### Kubernetes Deployment
+
+```yaml deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: koog-agent
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: koog-agent
+  template:
+    metadata:
+      labels:
+        app: koog-agent
+    spec:
+      containers:
+      - name: koog-agent
+        image: koog-agent:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: google-api-key
+        - name: GITHUB_PERSONAL_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: github-token
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: koog-agent
+spec:
+  selector:
+    app: koog-agent
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: LoadBalancer
+```
+
+## Customization
+
+### Change System Prompt
+
+Modify agent behavior in `application.yml`:
+
+```yaml
+agent:
+  system_prompt: |
+    You are a senior software engineer specializing in code review.
+    
+    Your responsibilities:
+    - Review code for bugs and security issues
+    - Suggest performance improvements
+    - Ensure code follows best practices
+    - Provide constructive feedback
+    
+    Always explain your reasoning clearly.
+```
+
+### Add Custom Tools
+
+Implement custom tools:
+
+```kotlin CustomTools.kt
+class DatabaseTools : ToolSet {
+    @Tool
+    @LLMDescription("Execute SQL query")
+    suspend fun executeQuery(sql: String): QueryResult {
+        // Implementation
+    }
+}
+
+// Register in ToolRegistryProvider
+when (toolDef.type) {
+    ToolType.SIMPLE -> {
+        when (toolDef.id) {
+            "database" -> registry += ToolRegistry {
+                tools(DatabaseTools().asTools())
+            }
+        }
+    }
+}
+```
+
+Add to `application.yml`:
+
+```yaml
+tools:
+  - type: SIMPLE
+    id: "database"
+```
+
+### Switch to Different LLM Provider
+
+Modify `AgentService.kt` to use different providers:
+
+```kotlin
+// Use OpenAI instead of Google
+val executor = OpenAILLMClient(System.getenv("OPENAI_API_KEY"))
+val model = OpenAIModels.Chat.GPT4o
+
+// Or Anthropic
+val executor = AnthropicLLMClient(System.getenv("ANTHROPIC_API_KEY"))
+val model = AnthropicModels.Claude_3_5_Sonnet
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Docker Connection Issues">
+    **Symptoms:** MCP servers fail to start
+    
+    **Solutions:**
+    1. Verify Docker is running: `docker ps`
+    2. Check Docker image exists: `docker images | grep mcp`
+    3. Increase startup delay in `ToolRegistryProvider`
+    4. Check Docker logs: `docker logs <container_id>`
+  </Accordion>
+
+  <Accordion title="API Key Errors">
+    **Symptoms:** 401 Unauthorized errors
+    
+    **Solutions:**
+    1. Verify environment variables are set
+    2. Check API key permissions (e.g., GitHub token scopes)
+    3. Ensure keys are not expired
+    4. Test keys independently before using with agent
+  </Accordion>
+
+  <Accordion title="S3 Permission Errors">
+    **Symptoms:** Failed to save agent state
+    
+    **Solutions:**
+    1. Verify AWS credentials are correct
+    2. Check S3 bucket exists and is accessible
+    3. Ensure IAM role has PutObject/GetObject permissions
+    4. Verify bucket region matches configuration
+  </Accordion>
+
+  <Accordion title="High Memory Usage">
+    **Symptoms:** Application crashes or slows down
+    
+    **Solutions:**
+    1. Enable S3 persistence to offload state
+    2. Reduce `maxAgentIterations` in config
+    3. Implement history compression
+    4. Increase JVM heap size: `-Xmx2g`
+  </Accordion>
+</AccordionGroup>
+
+## Source Code
+
+<Card title="View on GitHub" icon="github" href="https://github.com/koogio/koog/tree/main/examples/spring-boot-kotlin">
+  Explore the complete Spring Boot integration example
+</Card>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MCP Integration" icon="plug" href="/integrations/mcp">
+    Learn about Model Context Protocol
+  </Card>
+  
+  <Card title="Persistence" icon="database" href="/core-concepts/persistence">
+    Deep dive into agent state management
+  </Card>
+</CardGroup>

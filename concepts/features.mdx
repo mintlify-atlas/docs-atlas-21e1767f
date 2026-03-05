@@ -1,0 +1,592 @@
+---
+title: "Features"
+description: "Extending agent capabilities with the AIAgentFeature system"
+---
+
+## Overview
+
+The `AIAgentFeature` system provides a powerful way to extend agent capabilities through a plugin architecture. Features can intercept agent lifecycle events, modify behavior, add new functionality, and manage their own state - all without modifying core agent code.
+
+## Feature Architecture
+
+Features in Koog are:
+
+- **Modular**: Each feature is self-contained
+- **Configurable**: Features have their own configuration
+- **Type-safe**: Features are strongly typed with their implementation
+- **Pipeline-integrated**: Features hook into the agent execution pipeline
+
+## Feature Interface
+
+```kotlin
+public interface AIAgentFeature<TConfig : FeatureConfig, TFeatureImpl : Any> {
+    /**
+     * A key used to uniquely identify the feature in agent storage
+     */
+    public val key: AIAgentStorageKey<TFeatureImpl>
+    
+    /**
+     * Creates and returns an initial configuration for the feature
+     */
+    public fun createInitialConfig(): TConfig
+}
+```
+
+### Specialized Feature Interfaces
+
+#### AIAgentGraphFeature
+
+For features that work with graph-based agents:
+
+```kotlin
+public interface AIAgentGraphFeature<TConfig : FeatureConfig, TFeatureImpl : Any> 
+    : AIAgentFeature<TConfig, TFeatureImpl> {
+    /**
+     * Installs the feature into the graph pipeline
+     */
+    public fun install(config: TConfig, pipeline: AIAgentGraphPipeline): TFeatureImpl
+}
+```
+
+#### AIAgentFunctionalFeature
+
+For features that work with functional agents:
+
+```kotlin
+public interface AIAgentFunctionalFeature<TConfig : FeatureConfig, TFeatureImpl : Any> 
+    : AIAgentFeature<TConfig, TFeatureImpl> {
+    public fun install(config: TConfig, pipeline: AIAgentFunctionalPipeline): TFeatureImpl
+}
+```
+
+#### AIAgentPlannerFeature
+
+For features that work with planner agents:
+
+```kotlin
+public interface AIAgentPlannerFeature<TConfig : FeatureConfig, TFeatureImpl : Any> 
+    : AIAgentFeature<TConfig, TFeatureImpl> {
+    public fun install(config: TConfig, pipeline: AIAgentPlannerPipeline): TFeatureImpl
+}
+```
+
+## Installing Features
+
+### Basic Installation
+
+Install features during agent creation:
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    toolRegistry = toolRegistry
+) {
+    // Install features here
+    install(MyFeature) {
+        // Configure the feature
+        option1 = "value"
+        option2 = 42
+    }
+}
+```
+
+### Feature Context
+
+The `installFeatures` lambda provides a `FeatureContext`:
+
+```kotlin
+val agent = AIAgent(...) {
+    // FeatureContext receiver
+    install(EventHandler) {
+        onToolCall { ctx ->
+            println("Tool: ${ctx.tool.name}")
+        }
+    }
+    
+    install(TraceFeature) {
+        enableConsoleLogging = true
+    }
+}
+```
+
+## Built-In Features
+
+### Event Handler
+
+Capture and respond to agent lifecycle events:
+
+```kotlin
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+
+val agent = AIAgent(...) {
+    handleEvents {
+        // Agent lifecycle
+        onAgentStarting { ctx ->
+            logger.info("Agent ${ctx.agentId} starting")
+        }
+        
+        onAgentCompleted { ctx ->
+            logger.info("Agent completed with result: ${ctx.result}")
+        }
+        
+        onAgentExecutionFailed { ctx ->
+            logger.error("Agent failed", ctx.throwable)
+        }
+        
+        // Node execution
+        onNodeExecutionStarting { ctx ->
+            logger.debug("Node ${ctx.nodeName} starting")
+        }
+        
+        onNodeExecutionCompleted { ctx ->
+            logger.debug("Node ${ctx.nodeName} completed")
+        }
+        
+        // LLM calls
+        onLLMCallStarting { ctx ->
+            logger.debug("LLM call starting with ${ctx.messages.size} messages")
+        }
+        
+        onLLMCallCompleted { ctx ->
+            logger.debug("LLM returned: ${ctx.response}")
+        }
+        
+        // Tool calls
+        onToolCallStarting { ctx ->
+            println("Calling tool: ${ctx.tool.name}")
+            println("Arguments: ${ctx.toolArgs}")
+        }
+        
+        onToolCallCompleted { ctx ->
+            println("Tool ${ctx.tool.name} returned: ${ctx.result}")
+        }
+        
+        onToolCallFailed { ctx ->
+            logger.error("Tool ${ctx.tool.name} failed", ctx.throwable)
+        }
+        
+        // Subgraph execution
+        onSubgraphExecutionStarting { ctx ->
+            logger.debug("Subgraph ${ctx.subgraphName} starting")
+        }
+        
+        onSubgraphExecutionCompleted { ctx ->
+            logger.debug("Subgraph ${ctx.subgraphName} completed")
+        }
+    }
+}
+```
+
+<Note>
+The Event Handler feature is the most commonly used feature for debugging and monitoring agent execution.
+</Note>
+
+### Trace Feature
+
+Capture detailed execution traces:
+
+```kotlin
+import ai.koog.agents.features.trace.feature.tracing
+
+val agent = AIAgent(...) {
+    tracing {
+        enableConsoleLogging = true
+        enableFileLogging = true
+        logFilePath = "agent-trace.log"
+    }
+}
+
+// Access trace data
+val trace = agent.getFeature<TraceFeature>()
+val events = trace.getEvents()
+```
+
+### OpenTelemetry Integration
+
+Export telemetry data:
+
+```kotlin
+import ai.koog.agents.features.opentelemetry.feature.openTelemetry
+
+val agent = AIAgent(...) {
+    openTelemetry {
+        serviceName = "my-agent"
+        endpoint = "http://localhost:4317"
+        enableMetrics = true
+        enableTraces = true
+    }
+}
+```
+
+### Snapshot Feature
+
+Save and restore agent state:
+
+```kotlin
+import ai.koog.agents.features.snapshot.feature.snapshots
+
+val agent = AIAgent(...) {
+    snapshots {
+        autoSave = true
+        saveInterval = 30.seconds
+    }
+}
+
+// Manually save snapshot
+val snapshot = agent.getFeature<SnapshotFeature>()
+snapshot.save()
+
+// Restore from snapshot
+snapshot.restore(snapshotId)
+```
+
+## Creating Custom Features
+
+### Simple Feature Example
+
+Create a feature that counts tool calls:
+
+```kotlin
+// Feature implementation
+class ToolCallCounter {
+    private var count = 0
+    
+    fun increment() {
+        count++
+    }
+    
+    fun getCount() = count
+}
+
+// Feature configuration
+class ToolCallCounterConfig : FeatureConfig {
+    var logInterval: Int = 10
+}
+
+// Feature definition
+object ToolCallCounterFeature : AIAgentGraphFeature<ToolCallCounterConfig, ToolCallCounter> {
+    override val key = AIAgentStorageKey<ToolCallCounter>("tool-call-counter")
+    
+    override fun createInitialConfig() = ToolCallCounterConfig()
+    
+    override fun install(
+        config: ToolCallCounterConfig,
+        pipeline: AIAgentGraphPipeline
+    ): ToolCallCounter {
+        val counter = ToolCallCounter()
+        
+        // Intercept tool calls
+        pipeline.interceptToolCallCompleted(this) { ctx ->
+            counter.increment()
+            
+            val count = counter.getCount()
+            if (count % config.logInterval == 0) {
+                println("Tool calls: $count")
+            }
+        }
+        
+        return counter
+    }
+}
+
+// Extension function for convenience
+fun FeatureContext.countToolCalls(
+    configure: ToolCallCounterConfig.() -> Unit = {}
+) {
+    install(ToolCallCounterFeature, configure)
+}
+
+// Usage
+val agent = AIAgent(...) {
+    countToolCalls {
+        logInterval = 5
+    }
+}
+```
+
+### Accessing Features
+
+Retrieve installed features:
+
+```kotlin
+// Get feature from agent
+val counter = agent.getFeature<ToolCallCounter>()
+val count = counter.getCount()
+
+// Check if feature is installed
+if (agent.hasFeature<ToolCallCounter>()) {
+    val counter = agent.getFeature<ToolCallCounter>()
+}
+```
+
+## Pipeline Interception
+
+Features can intercept various points in the agent pipeline:
+
+### Agent Lifecycle
+
+```kotlin
+pipeline.interceptAgentStarting(this) { ctx ->
+    // Called when agent starts
+}
+
+pipeline.interceptAgentCompleted(this) { ctx ->
+    // Called when agent completes successfully
+}
+
+pipeline.interceptAgentExecutionFailed(this) { ctx ->
+    // Called when agent fails
+}
+
+pipeline.interceptAgentClosing(this) { ctx ->
+    // Called when agent is closing
+}
+```
+
+### Strategy Execution
+
+```kotlin
+pipeline.interceptStrategyStarting(this) { ctx ->
+    // Called when strategy execution starts
+}
+
+pipeline.interceptStrategyCompleted(this) { ctx ->
+    // Called when strategy completes
+}
+```
+
+### Node Execution (Graph agents only)
+
+```kotlin
+pipeline.interceptNodeExecutionStarting(this) { ctx ->
+    // Called before node executes
+}
+
+pipeline.interceptNodeExecutionCompleted(this) { ctx ->
+    // Called after node completes
+}
+
+pipeline.interceptNodeExecutionFailed(this) { ctx ->
+    // Called when node fails
+}
+```
+
+### LLM Calls
+
+```kotlin
+pipeline.interceptLLMCallStarting(this) { ctx ->
+    // Called before LLM call
+    // ctx.messages contains the messages being sent
+}
+
+pipeline.interceptLLMCallCompleted(this) { ctx ->
+    // Called after LLM responds
+    // ctx.response contains the LLM response
+}
+```
+
+### Tool Calls
+
+```kotlin
+pipeline.interceptToolCallStarting(this) { ctx ->
+    // Called before tool execution
+    // ctx.tool, ctx.toolArgs available
+}
+
+pipeline.interceptToolValidationFailed(this) { ctx ->
+    // Called when tool argument validation fails
+}
+
+pipeline.interceptToolCallCompleted(this) { ctx ->
+    // Called after tool execution
+    // ctx.result contains the tool result
+}
+
+pipeline.interceptToolCallFailed(this) { ctx ->
+    // Called when tool execution fails
+}
+```
+
+### Streaming
+
+```kotlin
+pipeline.interceptLLMStreamingStarting(this) { ctx ->
+    // Called when streaming starts
+}
+
+pipeline.interceptLLMStreamingFrameReceived(this) { ctx ->
+    // Called for each streaming frame
+}
+
+pipeline.interceptLLMStreamingCompleted(this) { ctx ->
+    // Called when streaming completes
+}
+```
+
+## Feature State Management
+
+Features can maintain state across agent execution:
+
+```kotlin
+class StatefulFeature {
+    private val state = mutableMapOf<String, Any>()
+    
+    fun set(key: String, value: Any) {
+        state[key] = value
+    }
+    
+    fun get(key: String): Any? = state[key]
+}
+
+object StatefulFeaturePlugin : AIAgentGraphFeature<FeatureConfig, StatefulFeature> {
+    override val key = AIAgentStorageKey<StatefulFeature>("stateful")
+    
+    override fun createInitialConfig() = object : FeatureConfig {}
+    
+    override fun install(
+        config: FeatureConfig,
+        pipeline: AIAgentGraphPipeline
+    ): StatefulFeature {
+        val feature = StatefulFeature()
+        
+        pipeline.interceptToolCallCompleted(this) { ctx ->
+            feature.set("lastTool", ctx.tool.name)
+            feature.set("lastResult", ctx.result)
+        }
+        
+        return feature
+    }
+}
+```
+
+## Multi-Agent Features
+
+Some features work across multiple agents:
+
+### A2A (Agent-to-Agent) Client
+
+```kotlin
+import ai.koog.agents.features.a2a.client.a2aClient
+
+val agent = AIAgent(...) {
+    a2aClient {
+        serverUrl = "http://other-agent:8080"
+        enableDiscovery = true
+    }
+}
+```
+
+### A2A Server
+
+```kotlin
+import ai.koog.agents.features.a2a.server.a2aServer
+
+val agent = AIAgent(...) {
+    a2aServer {
+        port = 8080
+        registerServices = true
+    }
+}
+```
+
+## Best Practices
+
+### Feature Design
+
+1. **Single responsibility**: One feature, one concern
+2. **Minimal configuration**: Provide sensible defaults
+3. **Efficient interception**: Only intercept events you need
+4. **Clean state management**: Clean up resources in `onAgentClosing`
+
+### Performance
+
+<Warning>
+**Minimize Interception Overhead**: Each interceptor adds latency. Only intercept events you actually use.
+
+```kotlin
+// ❌ Bad: Intercepting but doing nothing
+pipeline.interceptToolCallCompleted(this) { ctx ->
+    // Empty handler
+}
+
+// ✅ Good: Only intercept when needed
+if (config.trackToolCalls) {
+    pipeline.interceptToolCallCompleted(this) { ctx ->
+        trackToolCall(ctx)
+    }
+}
+```
+</Warning>
+
+### Error Handling
+
+Handle errors gracefully in interceptors:
+
+```kotlin
+pipeline.interceptToolCallCompleted(this) { ctx ->
+    try {
+        processToolResult(ctx.result)
+    } catch (e: Exception) {
+        logger.error("Feature processing failed", e)
+        // Don't let feature errors crash the agent
+    }
+}
+```
+
+## Testing Features
+
+### Unit Testing
+
+Test feature logic independently:
+
+```kotlin
+@Test
+fun testToolCallCounter() {
+    val counter = ToolCallCounter()
+    
+    counter.increment()
+    counter.increment()
+    
+    assertEquals(2, counter.getCount())
+}
+```
+
+### Integration Testing
+
+Test features with agents:
+
+```kotlin
+@Test
+fun testCounterFeature() = runTest {
+    val agent = AIAgent(
+        promptExecutor = mockExecutor,
+        llmModel = OpenAIModels.Chat.GPT4o,
+        toolRegistry = toolRegistry
+    ) {
+        countToolCalls()
+    }
+    
+    agent.run("Test input")
+    
+    val counter = agent.getFeature<ToolCallCounter>()
+    assertTrue(counter.getCount() > 0)
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Event Handler" icon="bell" href="/features/event-handler">
+    Learn about event handling in detail
+  </Card>
+  <Card title="Memory Features" icon="brain" href="/features/memory">
+    Add memory capabilities to agents
+  </Card>
+  <Card title="Tracing" icon="chart-line" href="/features/tracing">
+    Debug and monitor agent execution
+  </Card>
+  <Card title="Custom Features" icon="code" href="/guides/custom-features">
+    Build your own features
+  </Card>
+</CardGroup>

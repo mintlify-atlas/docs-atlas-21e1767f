@@ -1,0 +1,493 @@
+---
+title: OpenRouter Provider
+description: Access 100+ LLM providers through one unified API with automatic fallbacks
+---
+
+OpenRouter provides access to 100+ models from multiple providers through a single API. Perfect for multi-model strategies, cost optimization, and automatic failover.
+
+## Installation
+
+The OpenRouter client is included in the core Koog library. No additional dependencies required.
+
+## Quick Start
+
+```kotlin
+import ai.koog.prompt.executor.clients.openrouter.*
+import ai.koog.agents.core.*
+
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "anthropic/claude-3.5-sonnet"
+    )
+)
+
+val agent = AIAgent(
+    executor = executor,
+    tools = toolRegistry {
+        // Your tools here
+    }
+) {
+    // Define your agent strategy
+}
+
+val result = agent.execute("Compare different AI models...")
+```
+
+## Authentication
+
+### API Key Setup
+
+Get your API key from [OpenRouter](https://openrouter.ai/keys).
+
+```bash
+export OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+### Programmatic Configuration
+
+```kotlin
+val client = OpenRouterLLMClient(
+    apiKey = "sk-or-v1-...",
+    settings = OpenRouterClientSettings(
+        baseUrl = "https://openrouter.ai",
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 120_000
+        )
+    )
+)
+```
+
+## Available Models
+
+OpenRouter provides access to 100+ models. Use the model ID format: `provider/model-name`
+
+### Popular Models
+
+```kotlin
+// Anthropic
+val claude = LLModel(
+    provider = LLMProvider.OpenRouter,
+    id = "anthropic/claude-3.5-sonnet"
+)
+
+// OpenAI
+val gpt4 = LLModel(
+    provider = LLMProvider.OpenRouter,
+    id = "openai/gpt-4o"
+)
+
+// Google
+val gemini = LLModel(
+    provider = LLMProvider.OpenRouter,
+    id = "google/gemini-pro-1.5"
+)
+
+// Meta
+val llama = LLModel(
+    provider = LLMProvider.OpenRouter,
+    id = "meta-llama/llama-3.1-70b-instruct"
+)
+
+// Mistral
+val mistral = LLModel(
+    provider = LLMProvider.OpenRouter,
+    id = "mistralai/mistral-large"
+)
+```
+
+### List Available Models
+
+```kotlin
+val client = OpenRouterLLMClient(
+    apiKey = System.getenv("OPENROUTER_API_KEY")
+)
+
+val models = client.models()
+models.forEach { model ->
+    println("${model.id}: ${model.capabilities}")
+}
+```
+
+## Code Examples
+
+### Basic Chat Completion
+
+```kotlin
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "anthropic/claude-3.5-sonnet"
+    )
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user("Explain quantum computing")
+    }
+)
+
+println(result.first().content)
+```
+
+### Automatic Fallback
+
+Define multiple models for automatic failover:
+
+```kotlin
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "anthropic/claude-3.5-sonnet" // Primary
+    ),
+    params = OpenRouterParams(
+        models = listOf(
+            "anthropic/claude-3.5-sonnet",  // Try first
+            "openai/gpt-4o",                 // Fallback 1
+            "google/gemini-pro-1.5"          // Fallback 2
+        )
+    )
+)
+
+val result = executor.execute(
+    prompt = prompt { user("Hello") }
+)
+```
+
+### Cost Optimization
+
+Route to the cheapest available model:
+
+```kotlin
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "openai/gpt-3.5-turbo" // Cheap option
+    ),
+    params = OpenRouterParams(
+        route = "fallback" // Use cheapest available
+    )
+)
+```
+
+### Function Calling
+
+```kotlin
+data class CalculateArgs(val expression: String)
+
+val calculateTool = tool<CalculateArgs, Double>(
+    name = "calculate",
+    description = "Evaluate mathematical expressions"
+) { args ->
+    // Your calculation logic
+    42.0
+}
+
+val agent = AIAgent(
+    executor = simpleOpenRouterExecutor(
+        apiKey = System.getenv("OPENROUTER_API_KEY"),
+        model = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "openai/gpt-4o" // Good tool calling support
+        )
+    ),
+    tools = toolRegistry { tool(calculateTool) }
+) {
+    defineGraph<String, String>("calculator") {
+        val response = callLLM()
+        finish(response)
+    }
+}
+
+val result = agent.execute("What is 15 * 23?")
+```
+
+### Structured Output
+
+```kotlin
+@Serializable
+data class Recipe(
+    val name: String,
+    val ingredients: List<String>,
+    val steps: List<String>
+)
+
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "openai/gpt-4o" // Supports structured output
+    ),
+    params = OpenRouterParams(
+        schema = LLMParams.Schema.JSON.Standard(
+            name = "Recipe",
+            schema = /* JSON schema */
+        )
+    )
+)
+
+val result = executor.execute(
+    prompt = prompt {
+        user("Give me a recipe for chocolate chip cookies")
+    }
+)
+
+val recipe = Json.decodeFromString<Recipe>(result.first().content)
+```
+
+### Streaming Responses
+
+```kotlin
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "anthropic/claude-3.5-sonnet"
+    )
+)
+
+executor.executeStreaming(
+    prompt = prompt { user("Write a story about AI") }
+).collect { frame ->
+    when (frame) {
+        is StreamFrame.TextDelta -> print(frame.text)
+        is StreamFrame.End -> println("\nDone!")
+        else -> {}
+    }
+}
+```
+
+### Provider-Specific Routing
+
+Route to specific provider preferences:
+
+```kotlin
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "anthropic/claude-3.5-sonnet"
+    ),
+    params = OpenRouterParams(
+        provider = OpenRouterParams.ProviderPreferences(
+            allowFallbacks = true,
+            requireParameters = false,
+            dataCollection = "deny" // Privacy control
+        )
+    )
+)
+```
+
+### Embeddings
+
+```kotlin
+val client = OpenRouterLLMClient(
+    apiKey = System.getenv("OPENROUTER_API_KEY")
+)
+
+val embedding = client.embed(
+    text = "The quick brown fox",
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "openai/text-embedding-3-small"
+    )
+)
+
+println("Embedding dimensions: ${embedding.size}")
+```
+
+### Model Comparison
+
+Compare responses from different models:
+
+```kotlin
+val models = listOf(
+    "openai/gpt-4o",
+    "anthropic/claude-3.5-sonnet",
+    "google/gemini-pro-1.5"
+)
+
+val prompt = prompt { user("Explain machine learning") }
+
+val results = models.map { modelId ->
+    val executor = simpleOpenRouterExecutor(
+        apiKey = System.getenv("OPENROUTER_API_KEY"),
+        model = LLModel(provider = LLMProvider.OpenRouter, id = modelId)
+    )
+    modelId to executor.execute(prompt).first().content
+}
+
+results.forEach { (model, response) ->
+    println("$model: $response\n")
+}
+```
+
+## Advanced Configuration
+
+### Custom Parameters
+
+```kotlin
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "anthropic/claude-3.5-sonnet"
+    ),
+    params = OpenRouterParams(
+        temperature = 0.7,
+        maxTokens = 2000,
+        topP = 0.9,
+        topK = 40,
+        frequencyPenalty = 0.5,
+        presencePenalty = 0.5,
+        repetitionPenalty = 1.1,
+        minP = 0.05,
+        topA = 0.1
+    )
+)
+```
+
+### Transforms
+
+Apply transformations to requests:
+
+```kotlin
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "meta-llama/llama-3.1-70b"
+    ),
+    params = OpenRouterParams(
+        transforms = listOf("middle-out") // Compress context intelligently
+    )
+)
+```
+
+### User Tracking
+
+```kotlin
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "openai/gpt-4o"
+    ),
+    params = OpenRouterParams(
+        user = "user-123" // Track usage per user
+    )
+)
+```
+
+## Key Features
+
+### Unified API
+- **Single integration** for 100+ models
+- **Consistent interface** across providers
+- **Automatic format conversion**
+
+### Automatic Failover
+- **Fallback chain** when primary model fails
+- **Load balancing** across providers
+- **Uptime optimization**
+
+### Cost Management
+- **Compare prices** across providers
+- **Route to cheapest** available model
+- **Usage tracking** and credits
+
+### Provider Selection
+- **Prefer providers** by priority
+- **Exclude providers** you don't want
+- **Privacy controls** (data collection policies)
+
+## Pricing
+
+OpenRouter charges per token based on the underlying provider:
+
+- **Free models**: Available (with rate limits)
+- **Paid models**: Provider pricing + small markup
+- **Credits system**: Pre-pay for usage
+
+See [OpenRouter Pricing](https://openrouter.ai/docs#models) for current rates.
+
+## Best Practices
+
+1. **Set up fallbacks** for production reliability
+2. **Use free models** for development
+3. **Compare models** for your specific use case
+4. **Monitor costs** through the dashboard
+5. **Set spending limits** to control budget
+6. **Choose models carefully** - capabilities vary widely
+
+## Advantages
+
+- **No vendor lock-in**: Switch providers easily
+- **Access free models**: Many open-source options
+- **Experiment freely**: Try models without multiple API keys
+- **Automatic failover**: Better reliability
+- **Cost optimization**: Route to cheapest suitable model
+
+## Limitations
+
+- **Additional latency**: Routing adds overhead
+- **Markup on pricing**: Slightly more expensive than direct
+- **Rate limits**: Shared across all users
+- **Model availability**: Can vary by time/region
+- **No moderation API**: Not all provider features exposed
+
+## Troubleshooting
+
+### Model Not Available
+
+```kotlin
+try {
+    val result = executor.execute(prompt { user("Hello") })
+} catch (e: LLMClientException) {
+    if (e.message?.contains("model") == true) {
+        // Try a fallback model
+        val fallbackExecutor = simpleOpenRouterExecutor(
+            apiKey = apiKey,
+            model = LLModel(provider = LLMProvider.OpenRouter, id = "openai/gpt-3.5-turbo")
+        )
+        fallbackExecutor.execute(prompt { user("Hello") })
+    }
+}
+```
+
+### Rate Limiting
+
+```kotlin
+val client = OpenRouterLLMClient(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    settings = OpenRouterClientSettings(
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 180_000 // Allow more time
+        )
+    )
+)
+```
+
+### Error Handling
+
+```kotlin
+try {
+    val result = executor.execute(prompt { user("Hello") })
+} catch (e: LLMClientException) {
+    // OpenRouter includes detailed error info
+    println("Error: ${e.message}")
+    // May include cost info, provider status, etc.
+}
+```
+
+## Resources
+
+- [OpenRouter Documentation](https://openrouter.ai/docs)
+- [Available Models](https://openrouter.ai/models)
+- [Pricing](https://openrouter.ai/docs#models)
+- [API Keys](https://openrouter.ai/keys)
+- [API Reference](/api-reference/llm-providers/openrouter)

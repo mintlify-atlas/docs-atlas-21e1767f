@@ -1,0 +1,473 @@
+---
+title: Embeddings
+description: Generate and compare vector embeddings for semantic similarity analysis
+---
+
+The embeddings module provides functionality for generating and comparing vector representations of text and code, enabling semantic similarity analysis and efficient document retrieval.
+
+## Overview
+
+The embeddings module consists of two main components:
+
+- **embeddings-base**: Core interfaces and data structures
+- **embeddings-llm**: LLM-based embedding generation (OpenAI, Anthropic, etc.)
+
+**Why use embeddings?**
+
+- **Semantic Search**: Find documents by meaning, not just keywords
+- **Code Similarity**: Compare code snippets across different languages
+- **Document Clustering**: Group similar documents together
+- **Question Answering**: Match questions to relevant context
+- **Recommendation**: Find related content based on semantic similarity
+
+## Installation
+
+Add the embeddings dependencies:
+
+```kotlin gradle
+dependencies {
+    implementation("ai.koog:embeddings-base:$koogVersion")
+    implementation("ai.koog:embeddings-llm:$koogVersion")
+}
+```
+
+## Quick Start
+
+Generate embeddings and calculate similarity:
+
+```kotlin
+import ai.koog.embeddings.Embedder
+import ai.koog.embeddings.Vector
+
+// Create an embedder (using LLM provider)
+val embedder = createEmbedder()
+
+// Generate embeddings
+val embedding1 = embedder.embed("Kotlin is a modern programming language")
+val embedding2 = embedder.embed("Java is an object-oriented language")
+val embedding3 = embedder.embed("The weather is sunny today")
+
+// Calculate similarity (lower value = more similar)
+val diff1 = embedder.diff(embedding1, embedding2)  // Should be low (similar)
+val diff2 = embedder.diff(embedding1, embedding3)  // Should be high (different)
+
+println("Programming languages similarity: $diff1")
+println("Programming vs weather similarity: $diff2")
+```
+
+## Core Interfaces
+
+### Embedder
+
+The main interface for embedding operations:
+
+```kotlin
+interface Embedder {
+    /**
+     * Embeds the given text into a vector representation.
+     */
+    suspend fun embed(text: String): Vector
+
+    /**
+     * Calculates the difference between two embeddings.
+     * Lower values indicate more similar embeddings.
+     */
+    fun diff(embedding1: Vector, embedding2: Vector): Double
+}
+```
+
+**Source**: `embeddings/README.md:154`
+
+### Vector
+
+Represents a vector of floating-point values:
+
+```kotlin
+data class Vector(val values: List<Float>) {
+    /**
+     * Returns the dimension (size) of the vector.
+     */
+    val dimension: Int
+        get() = values.size
+
+    /**
+     * Calculates the cosine similarity between this vector and another vector.
+     * Returns a value between -1 and 1, where 1 means identical.
+     */
+    fun cosineSimilarity(other: Vector): Double
+
+    /**
+     * Calculates the Euclidean distance between this vector and another vector.
+     * Lower values indicate more similar vectors.
+     */
+    fun euclideanDistance(other: Vector): Double
+}
+```
+
+**Source**: `embeddings/README.md:173`
+
+## LLM-based Embeddings
+
+Use LLM providers for embedding generation:
+
+```kotlin
+import ai.koog.embeddings.llm.LLMEmbedder
+import ai.koog.prompt.executor.clients.openai.OpenAIEmbeddingProvider
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+// Create LLM embedding provider
+val embeddingProvider = OpenAIEmbeddingProvider(
+    apiKey = "your-api-key",
+    baseUrl = "https://api.openai.com"
+)
+
+// Create embedder
+val embedder = LLMEmbedder(
+    client = embeddingProvider,
+    model = OpenAIModels.Embeddings.TEXT_EMBEDDING_3_SMALL
+)
+
+// Use the embedder
+val embedding = embedder.embed("Your text here")
+```
+
+## Use Cases
+
+### Code-to-Text Comparison
+
+Compare code snippets with natural language descriptions:
+
+```kotlin
+suspend fun compareCodeToText(embedder: Embedder) {
+    // Code snippet
+    val code = """
+        fun factorial(n: Int): Int {
+            return if (n <= 1) 1 else n * factorial(n - 1)
+        }
+    """.trimIndent()
+
+    // Text descriptions
+    val description1 = "A recursive function that calculates the factorial of a number"
+    val description2 = "A function that sorts an array of integers"
+
+    // Generate embeddings
+    val codeEmbedding = embedder.embed(code)
+    val desc1Embedding = embedder.embed(description1)
+    val desc2Embedding = embedder.embed(description2)
+
+    // Calculate differences (lower value means more similar)
+    val diff1 = embedder.diff(codeEmbedding, desc1Embedding)
+    val diff2 = embedder.diff(codeEmbedding, desc2Embedding)
+
+    println("Difference between code and description 1: $diff1")
+    println("Difference between code and description 2: $diff2")
+
+    // The code should be more similar to description1
+    if (diff1 < diff2) {
+        println("The code is more similar to: '$description1'")
+    }
+}
+```
+
+**Source**: `embeddings/README.md:57`
+
+### Code-to-Code Comparison
+
+Compare code across different languages:
+
+```kotlin
+suspend fun compareCodeToCode(embedder: Embedder) {
+    // Two implementations of the same algorithm
+    val kotlinCode = """
+        fun fibonacci(n: Int): Int {
+            return if (n <= 1) n else fibonacci(n - 1) + fibonacci(n - 2)
+        }
+    """.trimIndent()
+
+    val pythonCode = """
+        def fibonacci(n):
+            if n <= 1:
+                return n
+            else:
+                return fibonacci(n-1) + fibonacci(n-2)
+    """.trimIndent()
+
+    val javaCode = """
+        public static int bubbleSort(int[] arr) {
+            int n = arr.length;
+            for (int i = 0; i < n-1; i++) {
+                for (int j = 0; j < n-i-1; j++) {
+                    if (arr[j] > arr[j+1]) {
+                        int temp = arr[j];
+                        arr[j] = arr[j+1];
+                        arr[j+1] = temp;
+                    }
+                }
+            }
+            return arr;
+        }
+    """.trimIndent()
+
+    // Generate embeddings
+    val kotlinEmbedding = embedder.embed(kotlinCode)
+    val pythonEmbedding = embedder.embed(pythonCode)
+    val javaEmbedding = embedder.embed(javaCode)
+
+    // Calculate differences
+    val diffKotlinPython = embedder.diff(kotlinEmbedding, pythonEmbedding)
+    val diffKotlinJava = embedder.diff(kotlinEmbedding, javaEmbedding)
+
+    println("Difference between Kotlin and Python: $diffKotlinPython")
+    println("Difference between Kotlin and Java: $diffKotlinJava")
+
+    // Kotlin and Python implementations should be more similar
+    if (diffKotlinPython < diffKotlinJava) {
+        println("The Kotlin code is more similar to the Python code")
+    }
+}
+```
+
+**Source**: `embeddings/README.md:95`
+
+### Semantic Search
+
+Find the most relevant documents:
+
+```kotlin
+suspend fun semanticSearch(embedder: Embedder, query: String, documents: List<String>): List<Pair<String, Double>> {
+    // Generate query embedding
+    val queryEmbedding = embedder.embed(query)
+
+    // Generate document embeddings and calculate similarity
+    val results = documents.map { doc ->
+        val docEmbedding = embedder.embed(doc)
+        val similarity = embedder.diff(queryEmbedding, docEmbedding)
+        doc to similarity
+    }
+
+    // Sort by similarity (lower is more similar)
+    return results.sortedBy { it.second }
+}
+
+// Usage
+val documents = listOf(
+    "Kotlin is a statically typed programming language",
+    "Machine learning is a subset of artificial intelligence",
+    "The weather forecast predicts rain tomorrow",
+    "Java is a popular object-oriented programming language"
+)
+
+val query = "What is Kotlin?"
+val topResults = semanticSearch(embedder, query, documents).take(2)
+
+println("Top results for: $query")
+topResults.forEach { (doc, score) ->
+    println("Score: $score - $doc")
+}
+```
+
+### Document Clustering
+
+Group similar documents:
+
+```kotlin
+suspend fun clusterDocuments(embedder: Embedder, documents: List<String>, threshold: Double = 0.5): List<List<String>> {
+    val embeddings = documents.map { embedder.embed(it) }
+    val clusters = mutableListOf<MutableList<String>>()
+
+    documents.forEachIndexed { index, doc ->
+        val embedding = embeddings[index]
+        
+        // Find cluster for this document
+        val matchingCluster = clusters.find { cluster ->
+            val clusterDoc = documents[documents.indexOf(cluster.first())]
+            val clusterEmbedding = embeddings[documents.indexOf(clusterDoc)]
+            embedder.diff(embedding, clusterEmbedding) < threshold
+        }
+
+        if (matchingCluster != null) {
+            matchingCluster.add(doc)
+        } else {
+            clusters.add(mutableListOf(doc))
+        }
+    }
+
+    return clusters
+}
+```
+
+## Similarity Metrics
+
+### Cosine Similarity
+
+Measures the cosine of the angle between vectors:
+
+```kotlin
+val vector1 = Vector(listOf(1.0f, 2.0f, 3.0f))
+val vector2 = Vector(listOf(2.0f, 4.0f, 6.0f))
+
+val similarity = vector1.cosineSimilarity(vector2)
+// Returns value between -1 and 1
+// 1 = identical direction
+// 0 = orthogonal
+// -1 = opposite direction
+```
+
+### Euclidean Distance
+
+Measures the straight-line distance between vectors:
+
+```kotlin
+val vector1 = Vector(listOf(1.0f, 2.0f, 3.0f))
+val vector2 = Vector(listOf(4.0f, 5.0f, 6.0f))
+
+val distance = vector1.euclideanDistance(vector2)
+// Lower values = more similar
+// 0 = identical vectors
+```
+
+## Supported Embedding Models
+
+### OpenAI
+
+```kotlin
+import ai.koog.prompt.executor.clients.openai.OpenAIModels
+
+// Small model (1536 dimensions)
+OpenAIModels.Embeddings.TEXT_EMBEDDING_3_SMALL
+
+// Large model (3072 dimensions)
+OpenAIModels.Embeddings.TEXT_EMBEDDING_3_LARGE
+
+// Legacy model (1536 dimensions)
+OpenAIModels.Embeddings.TEXT_EMBEDDING_ADA_002
+```
+
+### Anthropic
+
+Use Anthropic's embedding models through the LLM provider.
+
+### Custom Models
+
+Implement custom embedding providers:
+
+```kotlin
+class CustomEmbedder : Embedder {
+    override suspend fun embed(text: String): Vector {
+        // Your custom embedding logic
+        return Vector(listOf(/* embedding values */))
+    }
+
+    override fun diff(embedding1: Vector, embedding2: Vector): Double {
+        // Use cosine similarity or Euclidean distance
+        return embedding1.euclideanDistance(embedding2)
+    }
+}
+```
+
+## Performance Considerations
+
+1. **Batch Processing**: Process multiple documents in parallel
+   ```kotlin
+   val embeddings = documents.map { doc ->
+       async { embedder.embed(doc) }
+   }.awaitAll()
+   ```
+
+2. **Caching**: Cache embeddings to avoid recomputation
+   ```kotlin
+   val embeddingCache = mutableMapOf<String, Vector>()
+   
+   suspend fun getEmbedding(text: String): Vector {
+       return embeddingCache.getOrPut(text) {
+           embedder.embed(text)
+       }
+   }
+   ```
+
+3. **Dimension Reduction**: Use smaller models for faster processing
+   ```kotlin
+   // Use smaller model for better performance
+   val embedder = LLMEmbedder(
+       client = provider,
+       model = OpenAIModels.Embeddings.TEXT_EMBEDDING_3_SMALL
+   )
+   ```
+
+## Best Practices
+
+1. **Normalize Text**: Clean and normalize text before embedding
+   ```kotlin
+   fun normalizeText(text: String): String {
+       return text.trim().lowercase().replace("\\s+".toRegex(), " ")
+   }
+   ```
+
+2. **Choose Right Model**: Balance quality vs performance
+   - Small models: Faster, less accurate
+   - Large models: Slower, more accurate
+
+3. **Store Embeddings**: Cache embeddings in a database
+   ```kotlin
+   // Store in database for reuse
+   database.saveEmbedding(documentId, embedding.values)
+   ```
+
+4. **Handle Errors**: Gracefully handle API failures
+   ```kotlin
+   suspend fun safeEmbed(text: String): Vector? {
+       return try {
+           embedder.embed(text)
+       } catch (e: Exception) {
+           logger.error("Failed to generate embedding", e)
+           null
+       }
+   }
+   ```
+
+## Integration with RAG
+
+Use embeddings with RAG for document retrieval:
+
+```kotlin
+import ai.koog.rag.DocumentStorage
+import ai.koog.rag.RankedDocumentStorage
+
+// Embeddings power the semantic search in RAG
+val storage: RankedDocumentStorage<TextDocument> = createVectorStorage(embedder)
+
+// Store documents
+storage.store(TextDocument("Kotlin is a modern language"))
+storage.store(TextDocument("Java is an OOP language"))
+
+// Find relevant documents
+val relevantDocs = storage.mostRelevantDocuments(
+    query = "What is Kotlin?",
+    count = 5,
+    similarityThreshold = 0.7
+)
+```
+
+See the [RAG integration](/integrations/rag) for more details.
+
+## Platform Support
+
+- **JVM**: Full support
+- **JS**: Full support
+- **Native**: Planned
+
+## Common Use Cases
+
+1. **Semantic Search**: Find documents by meaning
+2. **Code Search**: Find similar code snippets
+3. **Question Answering**: Match questions to answers
+4. **Content Recommendation**: Suggest related content
+5. **Duplicate Detection**: Find duplicate or near-duplicate content
+6. **Document Classification**: Classify documents by similarity
+
+## Next Steps
+
+- Learn about [RAG capabilities](/integrations/rag) for document retrieval
+- Explore [vector storage](/integrations/rag#vector-storage) options
+- See [embedding examples](/examples/embeddings) in action
+- Check out [semantic search patterns](/guides/semantic-search)

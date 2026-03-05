@@ -1,0 +1,386 @@
+---
+title: Agent Client Protocol (ACP)
+description: Enable bidirectional communication between Koog agents and client applications
+---
+
+The Agent Client Protocol (ACP) integration enables bidirectional communication between Koog agents and client applications. Unlike MCP which focuses on tool integration, ACP provides real-time event streaming and session management.
+
+## What is ACP?
+
+The [Agent Client Protocol](https://agentclientprotocol.com/) is a standardized protocol that enables AI agents to communicate with client applications through a consistent interface. ACP provides:
+
+- **Bidirectional Communication**: Agents receive prompts and send real-time updates
+- **Event Streaming**: Real-time tool call status, reasoning, and progress updates
+- **Session Management**: Lifecycle management with session IDs
+- **Status Reporting**: Comprehensive tool call and execution status
+
+**Why use ACP?**
+
+- **Real-time Updates**: Stream events as the agent executes
+- **Progress Tracking**: Monitor tool calls, reasoning, and completion status
+- **Client Integration**: Standard protocol for connecting agents to UIs and applications
+- **Session State**: Manage long-running agent sessions with full lifecycle support
+
+## Installation
+
+Add the ACP integration dependency:
+
+```kotlin gradle
+dependencies {
+    implementation("ai.koog:agents-features-acp:$koogVersion")
+}
+```
+
+<Note>
+ACP is currently available only on the JVM platform.
+</Note>
+
+## Quick Start
+
+Implement an ACP-enabled agent session:
+
+```kotlin
+import ai.koog.agents.features.acp.AcpAgent
+import com.agentclientprotocol.agent.AgentSession
+import com.agentclientprotocol.common.Event
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+
+class KoogAgentSession(
+    override val sessionId: SessionId,
+    private val promptExecutor: PromptExecutor,
+    private val protocol: Protocol,
+    private val clock: Clock,
+) : AgentSession {
+
+    override suspend fun prompt(
+        content: List<ContentBlock>,
+        _meta: JsonElement?
+    ): Flow<Event> = channelFlow {
+        val agentConfig = AIAgentConfig(
+            prompt = prompt("acp") {
+                system("You are a helpful assistant.")
+            }.appendPrompt(content),
+            model = OpenAIModels.Chat.GPT4o,
+            maxAgentIterations = 1000
+        )
+
+        val agent = AIAgent(
+            promptExecutor = promptExecutor,
+            agentConfig = agentConfig,
+            strategy = yourStrategy(),
+            toolRegistry = toolRegistry,
+        ) {
+            install(AcpAgent) {
+                this.sessionId = this@KoogAgentSession.sessionId.value
+                this.protocol = this@KoogAgentSession.protocol
+                this.eventsProducer = this@channelFlow
+                this.setDefaultNotifications = true
+            }
+        }
+
+        agent.run(Unit)
+    }
+}
+```
+
+**Source**: `agents/agents-features/agents-features-acp/Module.md:43`
+
+## Configuration
+
+### AcpAgent Feature
+
+Install the AcpAgent feature in your agent:
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = executor,
+    strategy = strategy,
+    agentConfig = config,
+    toolRegistry = toolRegistry
+) {
+    install(AcpAgent) {
+        // Required: Session identifier
+        sessionId = "session-123"
+        
+        // Required: Protocol instance for communication
+        protocol = protocolInstance
+        
+        // Required: Channel for sending events
+        eventsProducer = channelFlowProducer
+        
+        // Optional: Auto-handle standard notifications (default: true)
+        setDefaultNotifications = true
+    }
+}
+```
+
+### Configuration Options
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `sessionId` | String | Yes | Unique session identifier |
+| `protocol` | Protocol | Yes | Protocol instance for sending requests |
+| `eventsProducer` | ProducerScope\<Event\> | Yes | Coroutine scope for sending events |
+| `setDefaultNotifications` | Boolean | No | Enable automatic notification handlers (default: true) |
+
+## Default Notification Handlers
+
+When `setDefaultNotifications` is enabled, AcpAgent automatically handles:
+
+### 1. Agent Completion
+
+Sends `PromptResponseEvent` with `StopReason.END_TURN` when the agent completes successfully.
+
+### 2. Agent Execution Failures
+
+Sends `PromptResponseEvent` with appropriate stop reasons:
+- `StopReason.MAX_TURN_REQUESTS` for max iterations exceeded
+- `StopReason.REFUSAL` for other execution failures
+
+### 3. LLM Responses
+
+Converts and sends LLM responses as ACP events (text, tool calls, reasoning).
+
+### 4. Tool Call Lifecycle
+
+Reports tool call status changes:
+- `ToolCallStatus.IN_PROGRESS` when a tool call starts
+- `ToolCallStatus.COMPLETED` when a tool call succeeds
+- `ToolCallStatus.FAILED` when a tool call fails
+
+**Source**: `agents/agents-features/agents-features-acp/src/jvmMain/kotlin/ai/koog/agents/features/acp/AcpAgent.kt:180`
+
+## Message Conversion
+
+The ACP integration provides utilities for converting between Koog and ACP message formats:
+
+### ACP to Koog
+
+Convert ACP content blocks to Koog messages:
+
+```kotlin
+import ai.koog.agents.features.acp.toKoogMessage
+import ai.koog.agents.features.acp.toKoogContentPart
+
+// Convert ACP content blocks to Koog message
+val koogMessage = acpContentBlocks.toKoogMessage(clock)
+
+// Convert single ACP content block to Koog content part
+val contentPart = acpContentBlock.toKoogContentPart()
+```
+
+### Koog to ACP
+
+Convert Koog messages to ACP events:
+
+```kotlin
+import ai.koog.agents.features.acp.toAcpEvents
+import ai.koog.agents.features.acp.toAcpContentBlock
+
+// Convert Koog response message to ACP events
+val acpEvents = koogResponseMessage.toAcpEvents()
+
+// Convert Koog content part to ACP content block
+val acpContentBlock = koogContentPart.toAcpContentBlock()
+```
+
+**Source**: `agents/agents-features/agents-features-acp/Module.md:148`
+
+## Supported Content Types
+
+The ACP integration supports the following content types:
+
+- **Text**: Plain text content
+- **Image**: Image data with MIME type
+- **Audio**: Audio data with MIME type
+- **File**: File attachments (embedded or linked)
+  - Base64-encoded binary data
+  - Plain text data
+  - URL references
+- **Resource**: Embedded resources with URI and content
+- **Resource Link**: Links to external resources
+
+## Sending Custom Events
+
+Access the ACP feature to send custom events:
+
+```kotlin
+import ai.koog.agents.features.acp.withAcpAgent
+
+val agent = AIAgent(...) {
+    install(AcpAgent) { ... }
+}
+
+// Send custom events during agent execution
+withAcpAgent {
+    sendEvent(
+        Event.SessionUpdateEvent(
+            SessionUpdate.PlanUpdate(planEntries)
+        )
+    )
+}
+```
+
+**Source**: `agents/agents-features/agents-features-acp/Module.md:134`
+
+## Complete Example
+
+Here's a complete implementation with proper session management:
+
+```kotlin
+class KoogAgentSession(
+    override val sessionId: SessionId,
+    private val promptExecutor: PromptExecutor,
+    private val protocol: Protocol,
+    private val clock: Clock,
+) : AgentSession {
+
+    private var agentJob: Deferred<Unit>? = null
+    private val agentMutex = Mutex()
+
+    override suspend fun prompt(
+        content: List<ContentBlock>,
+        _meta: JsonElement?
+    ): Flow<Event> = channelFlow {
+        val agentConfig = AIAgentConfig(
+            prompt = prompt("acp") {
+                system("You are a helpful assistant.")
+            }.appendPrompt(content),
+            model = OpenAIModels.Chat.GPT4o,
+            maxAgentIterations = 1000
+        )
+
+        agentMutex.withLock {
+            val agent = AIAgent(
+                promptExecutor = promptExecutor,
+                agentConfig = agentConfig,
+                strategy = yourStrategy(),
+                toolRegistry = toolRegistry,
+            ) {
+                install(AcpAgent) {
+                    this.sessionId = this@KoogAgentSession.sessionId.value
+                    this.protocol = this@KoogAgentSession.protocol
+                    this.eventsProducer = this@channelFlow
+                    this.setDefaultNotifications = true
+                }
+            }
+
+            agentJob = async { agent.run(Unit) }
+            agentJob?.await()
+        }
+    }
+
+    override suspend fun cancel() {
+        agentJob?.cancel()
+    }
+
+    private fun Prompt.appendPrompt(content: List<ContentBlock>): Prompt {
+        return withMessages { messages ->
+            messages + listOf(content.toKoogMessage(clock))
+        }
+    }
+}
+```
+
+## Implementation Notes
+
+1. **Use channelFlow**: Allows sending events from different coroutines
+2. **Enable Default Notifications**: Set `setDefaultNotifications = true` for automatic event handling
+3. **Convert Messages**: Use `toKoogMessage()` to convert ACP content blocks to Koog messages
+4. **Separate Coroutine**: Run the agent in a separate coroutine for proper cancellation
+5. **Mutex Synchronization**: Use mutex to prevent concurrent prompt executions
+
+**Source**: `agents/agents-features/agents-features-acp/Module.md:94`
+
+## Core Components
+
+### AcpAgent
+
+The main feature class for ACP integration:
+
+- Manages session lifecycle
+- Sends events to ACP clients
+- Handles automatic notifications
+- Intercepts agent execution events
+
+**Source**: `agents/agents-features/agents-features-acp/src/jvmMain/kotlin/ai/koog/agents/features/acp/AcpAgent.kt:40`
+
+### MessageConverters
+
+Utilities for converting between Koog and ACP message formats:
+
+- `toKoogMessage()`: Convert ACP content to Koog messages
+- `toAcpEvents()`: Convert Koog responses to ACP events
+- `toKoogContentPart()`: Convert individual content blocks
+- `toAcpContentBlock()`: Convert individual content parts
+
+**Source**: `agents/agents-features/agents-features-acp/src/jvmMain/kotlin/ai/koog/agents/features/acp/MessageConverters.kt`
+
+## Event Types
+
+### PromptResponseEvent
+
+Sent when agent completes or encounters an error:
+
+```kotlin
+Event.PromptResponseEvent(
+    response = PromptResponse(
+        stopReason = StopReason.END_TURN
+    )
+)
+```
+
+### SessionUpdateEvent
+
+Sent for tool calls and session updates:
+
+```kotlin
+Event.SessionUpdateEvent(
+    update = SessionUpdate.ToolCall(
+        toolCallId = ToolCallId("call_123"),
+        title = "Search Database",
+        status = ToolCallStatus.IN_PROGRESS,
+        rawInput = toolArgs
+    )
+)
+```
+
+## Platform Support
+
+- **JVM**: Full support
+- **JS**: Not supported (ACP Kotlin SDK is JVM-specific)
+- **Native**: Not supported
+
+## Common Use Cases
+
+1. **Web UIs**: Connect agents to React/Vue frontends
+2. **Mobile Apps**: Real-time agent updates in mobile applications
+3. **IDE Integration**: Agent communication in development tools
+4. **CLI Tools**: Interactive command-line agents with progress reporting
+5. **Microservices**: Agent-to-service communication in distributed systems
+
+## Best Practices
+
+1. **Use Mutex**: Synchronize agent execution to prevent concurrent prompts
+2. **Handle Cancellation**: Properly cancel agent jobs when sessions end
+3. **Error Handling**: Catch and report errors through ACP events
+4. **Event Ordering**: Ensure events are sent in the correct sequence
+5. **Resource Cleanup**: Close channels and release resources on session end
+
+## Examples
+
+Complete working examples are available in the repository:
+
+```bash
+./gradlew :examples:simple-examples:run
+```
+
+**Source**: `examples/simple-examples/src/main/kotlin/ai/koog/agents/example/acp/`
+
+## Next Steps
+
+- Learn about [Model Context Protocol](/integrations/model-context-protocol) for tool integration
+- Explore [Spring Boot integration](/integrations/spring-boot) for enterprise applications
+- See [Ktor integration](/integrations/ktor) for web services
+- Check out [complete examples](/examples/acp-integration)

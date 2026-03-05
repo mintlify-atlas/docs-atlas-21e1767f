@@ -1,0 +1,408 @@
+---
+title: Memory
+description: Short-term memory for storing and retrieving facts during agent execution
+---
+
+The Memory feature enables agents to store and retrieve information (facts) during execution, organized by concepts, subjects, and scopes. This provides short-term memory that persists across the agent's workflow.
+
+## What is Memory?
+
+Think of memory as a smart notebook where agents can:
+
+- **Store facts**: Remember important information during execution
+- **Retrieve facts**: Recall information when needed
+- **Share knowledge**: Exchange information between agents based on scope
+- **Organize information**: Structure data by concepts and subjects
+
+## Installation
+
+```kotlin
+import ai.koog.agents.memory.feature.AgentMemory
+import ai.koog.agents.memory.providers.LocalFileMemoryProvider
+import ai.koog.agents.memory.config.LocalMemoryConfig
+
+val agent = AIAgent(
+    executor = myExecutor,
+    strategy = myStrategy
+) {
+    install(AgentMemory) {
+        // Configure memory provider
+        memoryProvider = LocalFileMemoryProvider(
+            config = LocalMemoryConfig("my-agent-memory"),
+            storage = SimpleStorage(JVMFileSystemProvider),
+            root = Path("memory/data")
+        )
+        
+        // Configure scope names (optional)
+        featureName = "code-assistant"
+        productName = "my-ide"
+        organizationName = "my-company"
+    }
+}
+```
+
+## Core Concepts
+
+### Facts and Concepts
+
+Memory is organized around **concepts** - distinct pieces of knowledge the agent can remember:
+
+```kotlin
+import ai.koog.agents.memory.model.Concept
+import ai.koog.agents.memory.model.FactType
+import ai.koog.agents.memory.model.SingleFact
+import ai.koog.agents.memory.model.MultipleFact
+
+// Single fact - one value per concept
+val themeConcept = Concept(
+    keyword = "ide-theme",
+    description = "User's preferred IDE theme",
+    factType = FactType.SINGLE
+)
+
+val themeFact = SingleFact(
+    concept = themeConcept,
+    value = "Dark Theme",
+    timestamp = Clock.System.now().toEpochMilliseconds()
+)
+
+// Multiple facts - many values per concept  
+val languagesConcept = Concept(
+    keyword = "programming-languages",
+    description = "Languages the user knows",
+    factType = FactType.MULTIPLE
+)
+
+val languagesFact = MultipleFact(
+    concept = languagesConcept,
+    values = listOf("Kotlin", "Java", "Python"),
+    timestamp = Clock.System.now().toEpochMilliseconds()
+)
+```
+
+### Memory Subjects
+
+Subjects categorize facts by domain:
+
+```kotlin
+import ai.koog.agents.memory.model.MemorySubject
+import kotlinx.serialization.Serializable
+
+// Pre-defined subject
+MemorySubject.Everything // Broadest scope for general facts
+
+// Custom subject
+@Serializable
+data object ProjectSubject : MemorySubject() {
+    override val name: String = "project"
+    override val promptDescription: String = 
+        "Project details, dependencies, and configuration"
+    override val priorityLevel: Int = 3 // Lower = higher priority
+}
+```
+
+<Note>
+  **Priority Levels**: Lower numbers mean higher priority. If multiple subjects have facts for the same concept, the higher priority (lower number) takes precedence.
+</Note>
+
+### Memory Scopes
+
+Scopes control who can access stored information:
+
+```kotlin
+import ai.koog.agents.memory.model.MemoryScope
+
+// Agent scope - only this specific agent
+MemoryScope.Agent("my-agent-123")
+
+// Feature scope - shared between agents of the same feature
+MemoryScope.Feature("code-assistant")
+
+// Product scope - available across the entire product
+MemoryScope.Product("my-ide")
+
+// Cross-product scope - shared between different products
+MemoryScope.CrossProduct
+```
+
+## Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `memoryProvider` | `AgentMemoryProvider` | `NoMemory` | Storage provider for facts |
+| `agentName` | `String` | Strategy name | Name for AGENT-scoped memory |
+| `featureName` | `String` | `"unknown"` | Name for FEATURE-scoped memory |
+| `productName` | `String` | `"unknown"` | Name for PRODUCT-scoped memory |
+| `organizationName` | `String` | `"unknown"` | Name for ORGANIZATION-scoped memory |
+
+## Usage in Strategy Nodes
+
+### Loading Facts from Memory
+
+Use pre-built nodes to load facts at the start of your agent:
+
+```kotlin
+import ai.koog.agents.memory.feature.nodes.nodeLoadFromMemory
+
+val projectConcept = Concept(
+    "project-structure",
+    "Structure of the project including modules and folders",
+    FactType.MULTIPLE
+)
+
+val dependenciesConcept = Concept(
+    "project-dependencies",
+    "Dependencies in the build system",
+    FactType.MULTIPLE
+)
+
+// Load multiple concepts from memory into LLM context
+val loadFromMemory by nodeLoadFromMemory(
+    concepts = listOf(projectConcept, dependenciesConcept)
+)
+```
+
+### Saving Facts to Memory
+
+Save facts at the end of your agent's execution:
+
+```kotlin
+import ai.koog.agents.memory.feature.nodes.nodeSaveToMemory
+import ai.koog.agents.memory.config.MemoryScopeType
+
+val saveDependencies by nodeSaveToMemory(
+    concept = dependenciesConcept,
+    subject = ProjectSubject,
+    scope = MemoryScopeType.ORGANIZATION // Visible across products
+)
+
+val saveProjectStructure by nodeSaveToMemory(
+    concept = projectConcept,
+    subject = ProjectSubject,
+    scope = MemoryScopeType.PRODUCT // Only this product
+)
+```
+
+### Auto-Detecting Facts
+
+Let the LLM extract facts automatically from the conversation:
+
+```kotlin
+import ai.koog.agents.memory.feature.nodes.nodeSaveToMemoryAutoDetectFacts
+
+val saveAutoDetect by nodeSaveToMemoryAutoDetectFacts<Unit>(
+    subjects = listOf(ProjectSubject, MemorySubject.Everything)
+)
+```
+
+### Manual Memory Operations
+
+For full control, use the memory feature directly:
+
+```kotlin
+import ai.koog.agents.memory.feature.withMemory
+
+val saveUserPreference by node {
+    withMemory {
+        // Save a fact manually
+        memoryFeature.save(
+            fact = SingleFact(
+                concept = Concept("favorite-color", "User's favorite color", FactType.SINGLE),
+                value = "Red",
+                timestamp = getCurrentTimestamp()
+            ),
+            subject = MemorySubject.Everything,
+            scope = MemoryScopeType.ORGANIZATION
+        )
+    }
+}
+
+val loadProjectInfo by node {
+    withMemory {
+        // Load facts manually using higher-level abstraction
+        loadFactsToAgent(
+            Concept("project-structure", "Project structure", FactType.MULTIPLE)
+        )
+    }
+}
+```
+
+## Memory Providers
+
+### LocalFileMemoryProvider
+
+Stores facts in the local file system:
+
+```kotlin
+import ai.koog.agents.memory.providers.LocalFileMemoryProvider
+import ai.koog.agents.memory.config.LocalMemoryConfig
+import ai.koog.agents.memory.storage.SimpleStorage
+
+val memoryProvider = LocalFileMemoryProvider(
+    config = LocalMemoryConfig("agent-memory"),
+    storage = SimpleStorage(JVMFileSystemProvider),
+    root = Path("memory/data")
+)
+```
+
+### Encrypted Storage
+
+For sensitive information, use encrypted storage:
+
+```kotlin
+import ai.koog.agents.memory.storage.EncryptedStorage
+import ai.koog.agents.memory.storage.Aes256GCMEncryption
+
+val secureStorage = EncryptedStorage(
+    fs = JVMFileSystemProvider,
+    encryption = Aes256GCMEncryption("your-secret-key")
+)
+
+val memoryProvider = LocalFileMemoryProvider(
+    config = LocalMemoryConfig("secure-memory"),
+    storage = secureStorage,
+    root = Path("memory/secure")
+)
+```
+
+### NoMemory Provider
+
+Default provider that doesn't store anything:
+
+```kotlin
+import ai.koog.agents.memory.providers.NoMemory
+
+val memoryProvider = NoMemory // No persistence
+```
+
+## Memory Maintenance
+
+Clean up old or unused facts:
+
+```kotlin
+// Remove facts older than 30 days
+memoryProvider.cleanup {
+    olderThan(timeProvider.getCurrentTimestamp() - 30.days)
+}
+
+// Remove specific concepts
+memoryProvider.cleanup {
+    withConcept("temporary-data")
+}
+
+// Compact storage to save space
+memoryProvider.compact()
+```
+
+## Complete Example
+
+```kotlin
+import ai.koog.agents.core.dsl.graphStrategy
+import ai.koog.agents.memory.feature.AgentMemory
+import ai.koog.agents.memory.feature.nodes.*
+import ai.koog.agents.memory.model.*
+import ai.koog.agents.memory.config.MemoryScopeType
+
+// Define concepts
+val userPreferenceConcept = Concept(
+    "user-preferences",
+    "User's preferences and settings",
+    FactType.MULTIPLE
+)
+
+val projectConcept = Concept(
+    "project-info",
+    "Current project information",
+    FactType.SINGLE
+)
+
+// Create custom subject
+@Serializable
+data object UserSubject : MemorySubject() {
+    override val name = "user"
+    override val promptDescription = "User preferences and settings"
+    override val priorityLevel = 2
+}
+
+val agent = AIAgent(
+    executor = openAIExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = graphStrategy {
+        // Load facts at start
+        val loadMemory by nodeLoadFromMemory(
+            concepts = listOf(userPreferenceConcept, projectConcept)
+        )
+        
+        val processTask by node<String, String> { input ->
+            // Your agent logic here
+            "Processed: $input"
+        }
+        
+        // Save facts at end
+        val saveMemory by nodeSaveToMemory(
+            concept = projectConcept,
+            subject = UserSubject,
+            scope = MemoryScopeType.PRODUCT
+        )
+        
+        edges {
+            start goesTo loadMemory
+            loadMemory goesTo processTask
+            processTask goesTo saveMemory
+            saveMemory goesTo finish
+        }
+    }
+) {
+    install(AgentMemory) {
+        memoryProvider = LocalFileMemoryProvider(
+            config = LocalMemoryConfig("demo-memory"),
+            storage = SimpleStorage(JVMFileSystemProvider),
+            root = Path("./memory")
+        )
+        productName = "demo-app"
+    }
+}
+
+// Run the agent
+val result = agent.run("Analyze project dependencies")
+println(result)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Start simple">
+    Begin with `MemorySubject.Everything` and `MemoryScope.Agent` before creating custom subjects and broader scopes.
+  </Accordion>
+  
+  <Accordion title="Use clear concept names">
+    Make concept keywords and descriptions clear and specific. The LLM uses descriptions to understand what to extract.
+  </Accordion>
+  
+  <Accordion title="Choose appropriate fact types">
+    Use `SINGLE` for atomic facts ("build system: Gradle") and `MULTIPLE` for collections ("dependencies: [...]")
+  </Accordion>
+  
+  <Accordion title="Handle scope visibility">
+    Use narrower scopes (Agent, Feature) for sensitive data and broader scopes (Product, Organization) for shared knowledge.
+  </Accordion>
+  
+  <Accordion title="Clean up periodically">
+    Implement cleanup routines to remove old facts and prevent storage bloat.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  **Security**: Never store secrets or credentials in memory. Use encrypted storage for sensitive information and implement proper cleanup policies.
+</Warning>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Long-term Memory" icon="database" href="/features/longterm-memory">
+    Persistent memory with vector search for cross-session knowledge
+  </Card>
+  <Card title="History Compression" icon="compress" href="/features/history-compression">
+    Compress conversation history using memory-based fact extraction
+  </Card>
+</CardGroup>

@@ -1,0 +1,618 @@
+---
+title: 'Trip Planning Agent'
+description: 'Advanced agent integrating multiple APIs for intelligent trip planning'
+icon: 'map'
+---
+
+Build an advanced trip planning agent that integrates Google Maps, weather forecasts, and iterative user conversations to create personalized travel itineraries.
+
+## Overview
+
+This example demonstrates:
+- **Multi-API Integration**: Google Maps via MCP + Open Meteo weather API
+- **Complex Graph Strategy**: Sophisticated state machine with multiple subgraphs
+- **Iterative Planning**: User feedback loops for plan refinement
+- **Structured Output**: Type-safe trip plans with validation
+- **MCP Integration**: Model Context Protocol for external tool access
+
+## Architecture
+
+The agent uses a multi-stage strategy:
+
+1. **Clarify User Plan**: Collect destination, dates, preferences
+2. **Suggest Plan**: Use Google Maps and weather data to create itinerary
+3. **Get Feedback**: Present plan to user and collect feedback
+4. **Iterate**: Refine plan based on user corrections
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install Docker">
+    Docker is required for running the Google Maps MCP server.
+    
+    Verify installation:
+    ```bash
+    docker --version
+    ```
+  </Step>
+
+  <Step title="Get API Keys">
+    You'll need keys for:
+    - **OpenAI** (for main agent)
+    - **Anthropic** (optional, for multi-LLM)
+    - **Google AI** (Gemini, optional)
+    - **Google Maps** (for location data)
+    
+    Set environment variables:
+    ```bash
+    export OPENAI_API_KEY="your_openai_key"
+    export ANTHROPIC_API_KEY="your_anthropic_key"
+    export GOOGLE_AI_API_KEY="your_gemini_key"
+    export GOOGLE_MAPS_API_KEY="your_google_maps_key"
+    ```
+  </Step>
+
+  <Step title="Clone and Navigate">
+    ```bash
+    git clone https://github.com/koogio/koog.git
+    cd koog/examples/trip-planning-example
+    ```
+  </Step>
+</Steps>
+
+## Complete Implementation
+
+### Main Entry Point
+
+<CodeGroup>
+```kotlin Main.kt
+package ai.koog.agents.examples.tripplanning
+
+import ai.koog.agents.examples.tripplanning.api.OpenMeteoClient
+import ai.koog.agents.mcp.McpToolRegistryProvider
+import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
+import ai.koog.prompt.executor.clients.google.GoogleLLMClient
+import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
+import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
+import ai.koog.prompt.llm.LLMProvider
+import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
+import kotlinx.coroutines.delay
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+
+suspend fun main() {
+    val openAiKey = System.getenv("OPENAI_API_KEY")
+    val anthropicKey = System.getenv("ANTHROPIC_API_KEY")
+    val googleAiKey = System.getenv("GOOGLE_AI_API_KEY")
+    val googleMapsKey = System.getenv("GOOGLE_MAPS_API_KEY")
+
+    val googleMapsMcp = createGoogleMapsMcp(googleMapsKey)
+
+    try {
+        // Create agent
+        val agent = createPlannerAgent(
+            promptExecutor = MultiLLMPromptExecutor(
+                LLMProvider.OpenAI to OpenAILLMClient(openAiKey),
+                LLMProvider.Anthropic to AnthropicLLMClient(anthropicKey),
+                LLMProvider.Google to GoogleLLMClient(googleAiKey)
+            ),
+            openMeteoClient = OpenMeteoClient(),
+            googleMapsMcpRegistry = McpToolRegistryProvider.fromTransport(googleMapsMcp),
+            onToolCallEvent = {
+                println("Tool called: $it")
+            },
+            showMessage = {
+                println("Agent: $it")
+                print("Response > ")
+                readln()
+            }
+        )
+
+        // Get initial request
+        println("Hi, I'm a trip planner agent. Tell me where and when do you want to go, and I'll help you prepare the plan.")
+        print("Response > ")
+        val message = readln()
+
+        val timezone = TimeZone.currentSystemDefault()
+        val userInput = UserInput(
+            message = message,
+            currentDate = Clock.System.now().toLocalDateTime(timezone).date,
+            timezone = timezone,
+        )
+
+        // Print final result
+        val result: TripPlan = agent.run(userInput)
+        println(result.toMarkdownString())
+    } finally {
+        // Don't forget to close MCP transport after use
+        googleMapsMcp.close()
+    }
+}
+
+private suspend fun createGoogleMapsMcp(googleMapsKey: String): StdioClientTransport {
+    // Start MCP server
+    val process = ProcessBuilder(
+        "docker", "run", "-i",
+        "-e", "GOOGLE_MAPS_API_KEY=$googleMapsKey",
+        "mcp/google-maps"
+    ).start()
+
+    // Wait for the MCP server to boot
+    delay(1000)
+
+    // Create transport to MCP
+    return McpToolRegistryProvider.defaultStdioTransport(process)
+}
+```
+
+```kotlin Data Models
+package ai.koog.agents.examples.tripplanning
+
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.serialization.Serializable
+
+data class UserInput(
+    val message: String,
+    val currentDate: LocalDate,
+    val timezone: TimeZone
+)
+
+@Serializable
+data class TripPlan(
+    val locations: List<Location>,
+    val dailyPlans: List<DailyPlan>
+) {
+    @Serializable
+    data class Location(
+        val name: String,
+        val startDate: String,
+        val endDate: String
+    )
+
+    @Serializable
+    data class DailyPlan(
+        val date: String,
+        val location: String,
+        val activities: List<Activity>
+    )
+
+    @Serializable
+    data class Activity(
+        val time: String,
+        val name: String,
+        val description: String,
+        val placeId: String? = null,
+        val weatherConditions: String? = null
+    )
+
+    fun toMarkdownString(): String {
+        return buildString {
+            appendLine("# Trip Plan")
+            appendLine()
+            appendLine("## Locations")
+            locations.forEach { location ->
+                appendLine("- **${location.name}**: ${location.startDate} to ${location.endDate}")
+            }
+            appendLine()
+            appendLine("## Daily Itinerary")
+            dailyPlans.forEach { day ->
+                appendLine("### ${day.date} - ${day.location}")
+                day.activities.forEach { activity ->
+                    appendLine("- **${activity.time}**: ${activity.name}")
+                    appendLine("  ${activity.description}")
+                    if (activity.weatherConditions != null) {
+                        appendLine("  Weather: ${activity.weatherConditions}")
+                    }
+                }
+                appendLine()
+            }
+        }
+    }
+}
+
+@Serializable
+data class PlanSuggestionFeedback(
+    val isAccepted: Boolean,
+    val message: String
+)
+
+sealed class SuggestPlanRequest {
+    data class InitialRequest(
+        val userPlan: TripPlan
+    ) : SuggestPlanRequest()
+
+    data class CorrectionRequest(
+        val userFeedback: String,
+        val userPlan: TripPlan,
+        val prevSuggestedPlan: TripPlan
+    ) : SuggestPlanRequest()
+}
+```
+</CodeGroup>
+
+### Agent Strategy
+
+The strategy orchestrates the trip planning workflow:
+
+```kotlin Agent.kt (excerpt)
+fun createPlannerAgent(
+    promptExecutor: PromptExecutor,
+    openMeteoClient: OpenMeteoClient,
+    googleMapsMcpRegistry: ToolRegistry,
+    onToolCallEvent: (String) -> Unit,
+    showMessage: suspend (String) -> String,
+): AIAgent<UserInput, TripPlan> {
+    val googleMapTools = googleMapsMcpRegistry.tools
+    val weatherTools = WeatherTools(openMeteoClient)
+    val userTools = UserTools(showMessage)
+
+    val toolRegistry = ToolRegistry {
+        tool(::addDate)
+        tools(weatherTools)
+        tools(userTools)
+    } + googleMapsMcpRegistry
+
+    val plannerStrategy = plannerStrategy(
+        googleMapsTools = googleMapTools,
+        addDateTool = ::addDate.asTool(),
+        weatherTools = weatherTools,
+        userTools = userTools,
+    )
+
+    val agentConfig = AIAgentConfig(
+        prompt = prompt(
+            "planner-agent-prompt",
+            params = LLMParams(temperature = 0.2)
+        ) {
+            system(
+                """
+                You are a trip planning agent that helps the user to plan their trip.
+                Use the information provided by the user to suggest the best possible trip plan.
+                """.trimIndent()
+            )
+        },
+        model = OpenAIModels.Chat.GPT4o,
+        maxAgentIterations = 200
+    )
+
+    return AIAgent<UserInput, TripPlan>(
+        promptExecutor = promptExecutor,
+        strategy = plannerStrategy,
+        agentConfig = agentConfig,
+        toolRegistry = toolRegistry,
+    ) {
+        handleEvents {
+            onToolCall { ctx ->
+                onToolCallEvent(
+                    "Tool ${ctx.tool.name}, args ${
+                        ctx.toolArgs.toString().replace('\n', ' ').take(100)
+                    }..."
+                )
+            }
+        }
+    }
+}
+```
+
+### Planning Strategy Graph
+
+The core strategy uses subgraphs and conditional edges:
+
+```kotlin Planning Strategy
+private fun plannerStrategy(
+    googleMapsTools: List<Tool<*, *>>,
+    addDateTool: Tool<*, *>,
+    weatherTools: WeatherTools,
+    userTools: UserTools
+) = strategy<UserInput, TripPlan>("planner-strategy") {
+    val userPlanKey = createStorageKey<TripPlan>("user_plan")
+    val prevSuggestedPlanKey = createStorageKey<TripPlan>("prev_suggested_plan")
+
+    // Nodes
+    val setup by node<UserInput, String> { userInput ->
+        llm.writeSession {
+            updatePrompt {
+                system {
+                    +"Today's date is ${userInput.currentDate}."
+                }
+            }
+        }
+        userInput.message
+    }
+
+    val clarifyUserPlan by subgraphWithTask<String, TripPlan>(
+        tools = userTools.asTools() + addDateTool
+    ) { initialMessage ->
+        xml {
+            tag("instructions") {
+                +"""
+                Clarify a user plan until the locations, dates and additional information, such as user preferences, are provided.    
+                """.trimIndent()
+            }
+            tag("initial_user_message") {
+                +initialMessage
+            }
+        }
+    }
+
+    val suggestPlan by subgraphWithTask<SuggestPlanRequest, TripPlan>(
+        tools = googleMapsTools + weatherTools.asTools()
+    ) { input ->
+        xml {
+            tag("instructions") {
+                markdown {
+                    h2("Requirements")
+                    bulleted {
+                        item("Suggest the plan for ALL days and ALL locations in the user plan, preserving the order.")
+                        item("Follow the user plan and provide a detailed step-by-step plan suggestion with multiple options for each date.")
+                        item("Consider weather conditions when suggesting places for each date and time to assess how suitable the activity is for the weather.")
+                        item("Check detailed information about each place, such as opening hours and reviews, before adding it to the final plan suggestion.")
+                    }
+
+                    h2("Tool usage guidelines")
+                    +"""
+                    ALWAYS use "maps_search_places" tool to search for places, AVOID making your own suggestions.
+                    While searching for places, keep search query short and specific:
+                    Example DO: "museum", "historical museum", "italian restaurant", "coffee shop", "art gallery"
+                    Example DON'T: "interesting cultural sites", "local cuisine restaurants", "restaurant in the city center"
+                    """.trimIndent()
+                }
+            }
+
+            when (input) {
+                is SuggestPlanRequest.InitialRequest -> {
+                    tag("user_plan") {
+                        +input.userPlan.toMarkdownString()
+                    }
+                }
+                is SuggestPlanRequest.CorrectionRequest -> {
+                    tag("additional_instructions") {
+                        +"User asked for corrections to the previously suggested plan. Provide updated plan according to these corrections."
+                    }
+                    tag("user_plan") {
+                        +input.userPlan.toMarkdownString()
+                    }
+                    tag("previously_suggested_plan") {
+                        +input.prevSuggestedPlan.toMarkdownString()
+                    }
+                    tag("user_feedback") {
+                        +input.userFeedback
+                    }
+                }
+            }
+        }
+    }
+
+    val saveUserPlan by node<TripPlan, Unit> { plan ->
+        storage.set(userPlanKey, plan)
+        llm.writeSession {
+            replaceHistoryWithTLDR(strategy = HistoryCompressionStrategy.WholeHistory)
+        }
+    }
+
+    val savePrevSuggestedPlan by node<TripPlan, TripPlan> { plan ->
+        storage.set(prevSuggestedPlanKey, plan)
+        llm.writeSession {
+            replaceHistoryWithTLDR(strategy = HistoryCompressionStrategy.WholeHistory)
+        }
+        plan
+    }
+
+    val showPlanSuggestion by node<String, String> { message ->
+        userTools.showMessage(message)
+    }
+
+    val processUserFeedback by nodeLLMRequestStructured<PlanSuggestionFeedback>()
+
+    // Edges - define the flow
+    nodeStart then setup then clarifyUserPlan then saveUserPlan
+
+    edge(
+        savePrevSuggestedPlan forwardTo showPlanSuggestion
+            transformed { it.toMarkdownString() }
+    )
+
+    edge(showPlanSuggestion forwardTo processUserFeedback)
+
+    // Feedback loop: if not accepted, iterate
+    edge(
+        processUserFeedback forwardTo createPlanCorrectionRequest
+            transformed { it.getOrThrow().structure }
+            onCondition { !it.isAccepted }
+            transformed { it.message }
+    )
+
+    // If accepted, finish
+    edge(
+        processUserFeedback forwardTo nodeFinish
+            transformed { it.getOrThrow().structure }
+            onCondition { it.isAccepted }
+            transformed { storage.getValue(prevSuggestedPlanKey) }
+    )
+
+    edge(createPlanCorrectionRequest forwardTo suggestPlan)
+}
+```
+
+## Key Features Explained
+
+### 1. MCP Integration
+
+Model Context Protocol enables access to Google Maps tools:
+
+```kotlin
+val googleMapsMcp = createGoogleMapsMcp(googleMapsKey)
+val googleMapsMcpRegistry = McpToolRegistryProvider.fromTransport(googleMapsMcp)
+```
+
+The agent automatically gets access to:
+- `maps_search_places`: Search for places by query
+- `maps_get_place_details`: Get detailed info about a place
+- `maps_get_directions`: Calculate routes between locations
+
+### 2. Weather Integration
+
+Custom tools fetch weather forecasts:
+
+```kotlin Weather Tools
+class WeatherTools(private val openMeteoClient: OpenMeteoClient) : ToolSet {
+    @Tool
+    @LLMDescription("Get weather forecast for a location")
+    suspend fun getWeather(
+        @LLMDescription("Latitude") latitude: Double,
+        @LLMDescription("Longitude") longitude: Double,
+        @LLMDescription("Start date (YYYY-MM-DD)") startDate: String,
+        @LLMDescription("End date (YYYY-MM-DD)") endDate: String
+    ): WeatherForecast {
+        return openMeteoClient.getWeather(
+            latitude, longitude, startDate, endDate
+        )
+    }
+}
+```
+
+### 3. Iterative Refinement
+
+The strategy includes a feedback loop:
+
+1. Agent presents suggested plan to user
+2. User provides feedback (accept or request changes)
+3. If changes requested, agent refines plan with new constraints
+4. Loop continues until user accepts
+
+### 4. History Compression
+
+Large plans consume context quickly. The strategy compresses history after each major stage:
+
+```kotlin
+llm.writeSession {
+    replaceHistoryWithTLDR(strategy = HistoryCompressionStrategy.WholeHistory)
+}
+```
+
+## Running the Example
+
+<Steps>
+  <Step title="Start Docker">
+    Ensure Docker daemon is running:
+    ```bash
+    docker ps
+    ```
+  </Step>
+
+  <Step title="Set API Keys">
+    ```bash
+    export OPENAI_API_KEY="your_openai_key"
+    export ANTHROPIC_API_KEY="your_anthropic_key"
+    export GOOGLE_AI_API_KEY="your_gemini_key"
+    export GOOGLE_MAPS_API_KEY="your_google_maps_key"
+    ```
+  </Step>
+
+  <Step title="Run the Agent">
+    ```bash
+    cd examples/trip-planning-example
+    ./gradlew run
+    ```
+  </Step>
+
+  <Step title="Interact">
+    Example conversation:
+    ```
+    Agent: Hi, I'm a trip planner agent. Tell me where and when do you want to go...
+    You: I want to visit Paris for 3 days starting next Monday
+    
+    Agent: What are your interests? (museums, food, nightlife, etc.)
+    You: Museums and good restaurants
+    
+    [Agent searches for places and checks weather]
+    
+    Agent: Here's your suggested itinerary...
+    [Displays detailed plan]
+    
+    Agent: Would you like to make any changes?
+    You: Can you add more time for the Louvre?
+    
+    [Agent refines the plan]
+    ```
+  </Step>
+</Steps>
+
+## Example Output
+
+```markdown
+# Trip Plan
+
+## Locations
+- **Paris, France**: 2024-06-10 to 2024-06-12
+
+## Daily Itinerary
+### 2024-06-10 - Paris
+- **09:00**: Louvre Museum
+  Explore world-famous art collection. Arrive early to avoid crowds.
+  Weather: Sunny, 22°C
+- **13:00**: Le Comptoir du Relais
+  Authentic French bistro near Latin Quarter
+  Weather: Partly cloudy, 24°C
+- **15:00**: Notre-Dame Cathedral
+  Gothic architecture masterpiece (exterior viewing)
+  Weather: Partly cloudy, 24°C
+
+### 2024-06-11 - Paris
+...
+```
+
+## Advanced Customization
+
+### Add Custom Tools
+
+Extend the agent with additional data sources:
+
+```kotlin
+class RestaurantReservationTools : ToolSet {
+    @Tool
+    @LLMDescription("Check restaurant availability")
+    suspend fun checkAvailability(
+        restaurantId: String,
+        date: String,
+        time: String,
+        partySize: Int
+    ): AvailabilityResult {
+        // Integration with reservation API
+    }
+}
+
+val toolRegistry = ToolRegistry {
+    tools(weatherTools)
+    tools(userTools)
+    tools(RestaurantReservationTools())  // Add your tools
+} + googleMapsMcpRegistry
+```
+
+### Modify Planning Strategy
+
+Customize the planning logic in the strategy function to add:
+- Budget constraints
+- Accessibility requirements
+- Transportation preferences
+- Group size considerations
+
+## Source Code
+
+<Card title="View on GitHub" icon="github" href="https://github.com/koogio/koog/tree/main/examples/trip-planning-example">
+  Explore the complete trip planning example source code
+</Card>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MCP Integration" icon="plug" href="/integrations/mcp">
+    Learn more about Model Context Protocol
+  </Card>
+  
+  <Card title="Custom Strategies" icon="diagram-project" href="/core-concepts/strategies">
+    Build your own graph strategies
+  </Card>
+</CardGroup>

@@ -1,0 +1,461 @@
+---
+title: "Strategies"
+description: "Understanding AIAgentStrategy - defining how agents process inputs and make decisions"
+---
+
+## Overview
+
+An `AIAgentStrategy` defines the execution logic of an AI agent. It encapsulates how the agent processes input to produce output, manages tool selection, and orchestrates the workflow. Strategies are the "brain" of the agent, determining the sequence of operations and decision-making logic.
+
+## Strategy Interface
+
+All strategies implement the `AIAgentStrategy` interface:
+
+```kotlin
+interface AIAgentStrategy<TInput, TOutput, TContext : AIAgentContext> {
+    /**
+     * The name of the strategy
+     */
+    val name: String
+    
+    /**
+     * Executes the strategy with the given context and input
+     */
+    suspend fun execute(context: TContext, input: TInput): TOutput?
+}
+```
+
+## Graph-Based Strategies
+
+### AIAgentGraphStrategy
+
+The most common strategy type, `AIAgentGraphStrategy` represents workflows as directed graphs of interconnected nodes:
+
+```kotlin
+public class AIAgentGraphStrategy<TInput, TOutput>(
+    override val name: String,
+    public val nodeStart: StartNode<TInput>,
+    public val nodeFinish: FinishNode<TOutput>,
+    toolSelectionStrategy: ToolSelectionStrategy
+)
+```
+
+**Key Components**:
+- **Start Node**: Entry point receiving agent input
+- **Finish Node**: Exit point producing agent output  
+- **Tool Selection Strategy**: Determines which tools are available during execution
+
+### Creating Graph Strategies
+
+Use the DSL to build graph-based strategies:
+
+```kotlin
+val strategy = strategy<String, String>("my-strategy") {
+    // Define nodes
+    val callLLM by nodeLLMRequest()
+    val processTool by nodeExecuteTool()
+    val sendResult by nodeLLMSendToolResult()
+    
+    // Define edges (workflow)
+    nodeStart then callLLM
+    
+    edge(callLLM forwardTo processTool onToolCall { true })
+    edge(callLLM forwardTo nodeFinish onAssistantMessage { true })
+    
+    edge(processTool forwardTo sendResult)
+    edge(sendResult forwardTo callLLM onToolCall { true })
+    edge(sendResult forwardTo nodeFinish onAssistantMessage { true })
+}
+```
+
+### Nodes
+
+Nodes represent individual steps in the workflow:
+
+```kotlin
+// LLM request node
+val askLLM by nodeLLMRequest()
+
+// Custom transformation node
+val transform by node<String, String> { input ->
+    input.uppercase()
+}
+
+// Structured LLM response
+val getStructured by nodeLLMRequestStructured<MyDataClass>()
+
+// Tool execution
+val executeTool by nodeExecuteTool()
+```
+
+### Edges
+
+Edges connect nodes and define the flow:
+
+```kotlin
+// Simple edge
+nodeStart then callLLM then nodeFinish
+
+// Conditional edge
+edge(
+    callLLM forwardTo executeTool
+        onCondition { response -> response.hasToolCalls() }
+)
+
+// Transformed edge
+edge(
+    callLLM forwardTo nodeFinish
+        transformed { response -> response.content }
+)
+
+// Combined conditions
+edge(
+    callLLM forwardTo executeTool
+        onToolCall { true }
+        transformed { it.toolCalls.first() }
+)
+```
+
+## Built-In Strategies
+
+### Single Run Strategy
+
+The most common strategy for basic agent workflows:
+
+```kotlin
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = singleRunStrategy(),
+    toolRegistry = toolRegistry
+)
+```
+
+**Execution Flow**:
+1. Start with user input
+2. Call LLM with input
+3. If LLM requests tools, execute them
+4. Send tool results back to LLM
+5. Repeat until LLM returns final answer
+6. Return answer as output
+
+<Note>
+The `singleRunStrategy` handles the common pattern of LLM ↔ Tool interaction automatically.
+</Note>
+
+### Tool Call Modes
+
+`singleRunStrategy` supports different tool execution modes:
+
+```kotlin
+// Sequential tool calls (default)
+val strategy = singleRunStrategy(ToolCalls.SEQUENTIAL)
+
+// Parallel tool calls
+val strategy = singleRunStrategy(ToolCalls.PARALLEL)
+
+// Single tool call per iteration
+val strategy = singleRunStrategy(ToolCalls.SINGLE_RUN_SEQUENTIAL)
+```
+
+<Warning>
+**Parallel Tool Calls**: Use `ToolCalls.PARALLEL` only when tools are independent and don't share state. Otherwise, race conditions may occur.
+</Warning>
+
+### Single Run with History Compression
+
+For long-running conversations, compress history to save tokens:
+
+```kotlin
+val strategy = singleRunStrategyWithHistoryCompression(
+    compressionStrategy = HistoryCompressionStrategy.WholeHistory
+)
+```
+
+## Custom Strategies
+
+### Building Complex Workflows
+
+Create multi-step workflows with subgraphs:
+
+```kotlin
+val strategy = strategy<UserInput, TripPlan>("planner-strategy") {
+    // Storage for state
+    val userPlanKey = createStorageKey<TripPlan>("user_plan")
+    
+    // Setup node
+    val setup by node<UserInput, String> { userInput ->
+        llm.writeSession {
+            updatePrompt {
+                system { +"Today's date is ${userInput.currentDate}" }
+            }
+        }
+        userInput.message
+    }
+    
+    // Subgraph for clarifying user intent
+    val clarifyPlan by subgraphWithTask<String, TripPlan>(
+        tools = userTools
+    ) { message ->
+        xml {
+            tag("instructions") {
+                +"Clarify the user's trip plan until all details are provided."
+            }
+            tag("message") { +message }
+        }
+    }
+    
+    // Save to storage
+    val savePlan by node<TripPlan, TripPlan> { plan ->
+        storage.set(userPlanKey, plan)
+        plan
+    }
+    
+    // Suggest detailed plan
+    val suggestPlan by subgraphWithTask<TripPlan, TripPlan>(
+        tools = weatherTools + mapsTools
+    ) { userPlan ->
+        xml {
+            tag("instructions") {
+                +"Suggest a detailed itinerary based on the user plan."
+            }
+            tag("user_plan") { +userPlan.toMarkdown() }
+        }
+    }
+    
+    // Connect nodes
+    nodeStart then setup then clarifyPlan then savePlan then suggestPlan then nodeFinish
+}
+```
+
+### Conditional Branching
+
+Create strategies with multiple paths:
+
+```kotlin
+val strategy = strategy<String, String>("conditional-strategy") {
+    val analyze by nodeLLMRequestStructured<Analysis>()
+    val handleSimple by node<Analysis, String> { /* ... */ }
+    val handleComplex by node<Analysis, String> { /* ... */ }
+    
+    nodeStart then analyze
+    
+    edge(
+        analyze forwardTo handleSimple
+            onCondition { it.complexity == "simple" }
+    )
+    
+    edge(
+        analyze forwardTo handleComplex
+            onCondition { it.complexity == "complex" }
+    )
+    
+    edge(handleSimple forwardTo nodeFinish)
+    edge(handleComplex forwardTo nodeFinish)
+}
+```
+
+## Functional Strategies
+
+### AIAgentFunctionalStrategy
+
+For simpler, function-based workflows:
+
+```kotlin
+val functionalStrategy = object : AIAgentFunctionalStrategy<String, String> {
+    override val name = "functional-strategy"
+    
+    override suspend fun execute(
+        context: AIAgentFunctionalContext,
+        input: String
+    ): String {
+        // Custom logic
+        val response = context.llm.call(input)
+        return response.content
+    }
+}
+
+val agent = AIAgent(
+    promptExecutor = promptExecutor,
+    llmModel = OpenAIModels.Chat.GPT4o,
+    strategy = functionalStrategy,
+    toolRegistry = toolRegistry
+)
+```
+
+## Planner Strategies
+
+### AIAgentPlannerStrategy
+
+For planning-based workflows that manage world state:
+
+```kotlin
+val plannerStrategy = AIAgentPlannerStrategy<WorldState, Plan>(
+    name = "planner",
+    planningLogic = { context, worldState ->
+        // Generate plan based on world state
+        generatePlan(worldState)
+    },
+    executionLogic = { context, plan ->
+        // Execute plan
+        executePlan(plan)
+    }
+)
+```
+
+## Strategy Context
+
+Strategies execute within a context providing access to:
+
+### LLM Context
+
+Interact with the language model:
+
+```kotlin
+val response = context.llm.call("What is 2+2?")
+
+context.llm.writeSession {
+    updatePrompt {
+        system { +"You are a math tutor." }
+    }
+}
+```
+
+### Storage
+
+Persist state across nodes:
+
+```kotlin
+val key = createStorageKey<MyData>("my-data")
+
+// Store
+context.storage.set(key, myData)
+
+// Retrieve
+val data = context.storage.getValue(key)
+
+// Check existence
+if (context.storage.contains(key)) {
+    val data = context.storage.get(key)
+}
+```
+
+### Environment
+
+Safely execute tools:
+
+```kotlin
+val toolCall = Message.Tool.Call(
+    name = "search",
+    arguments = searchArgs
+)
+
+val result = context.environment.executeTool(toolCall)
+```
+
+## Subgraphs
+
+Break complex workflows into reusable subgraphs:
+
+```kotlin
+val mainStrategy = strategy<String, String>("main") {
+    val subgraph1 by subgraph(createSubStrategy1())
+    val subgraph2 by subgraph(createSubStrategy2())
+    
+    nodeStart then subgraph1 then subgraph2 then nodeFinish
+}
+
+fun createSubStrategy1() = strategy<String, String>("sub1") {
+    val process by node<String, String> { /* ... */ }
+    nodeStart then process then nodeFinish
+}
+```
+
+### Task-Based Subgraphs
+
+Create subgraphs with specific tool sets:
+
+```kotlin
+val clarify by subgraphWithTask<String, UserPlan>(
+    tools = userTools + dateTools
+) { input ->
+    // Prompt for this subgraph
+    "Clarify the user's intent: $input"
+}
+```
+
+## Testing Strategies
+
+Test your strategy structure:
+
+```kotlin
+AIAgent(...) {
+    withTesting()
+    
+    testGraph("test") {
+        val subgraph = assertSubgraphByName<String, String>("my-subgraph")
+        
+        assertEdges {
+            startNode() alwaysGoesTo subgraph
+            subgraph alwaysGoesTo finishNode()
+        }
+        
+        verifySubgraph(subgraph) {
+            val node = assertNodeByName<String, String>("my-node")
+            assertNodes {
+                node withInput "test" outputs "result"
+            }
+        }
+    }
+}
+```
+
+## Best Practices
+
+### Strategy Design
+
+1. **Keep strategies focused**: One strategy per logical workflow
+2. **Use subgraphs for reusability**: Extract common patterns
+3. **Name nodes descriptively**: Makes debugging easier
+4. **Handle all edge cases**: Define edges for all possible outputs
+
+### Performance
+
+1. **Minimize LLM calls**: Batch operations when possible
+2. **Use parallel tool execution**: When tools are independent
+3. **Compress history**: For long conversations
+4. **Cache repeated computations**: Use storage for intermediate results
+
+### Error Handling
+
+```kotlin
+val strategy = strategy<String, String>("resilient") {
+    val process by node<String, String> { input ->
+        try {
+            processInput(input)
+        } catch (e: Exception) {
+            context.environment.reportProblem(e)
+            "Error: ${e.message}"
+        }
+    }
+    
+    nodeStart then process then nodeFinish
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tools" icon="wrench" href="/concepts/tools">
+    Learn about creating and using tools
+  </Card>
+  <Card title="Tool Registry" icon="list" href="/concepts/tool-registry">
+    Manage tool collections
+  </Card>
+  <Card title="Environment" icon="shield" href="/concepts/environment">
+    Safe tool execution contexts
+  </Card>
+  <Card title="Features" icon="puzzle-piece" href="/concepts/features">
+    Extend strategies with features
+  </Card>
+</CardGroup>

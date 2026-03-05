@@ -1,0 +1,163 @@
+---
+title: LLM Providers Overview
+description: Compare and choose the right LLM provider for your Koog AI agents
+---
+
+Koog supports multiple LLM providers, each with unique strengths and capabilities. This guide helps you choose the right provider for your use case.
+
+## Supported Providers
+
+| Provider | Strengths | Use Cases | Pricing |
+|----------|-----------|-----------|----------|
+| **OpenAI** | Most capable models, cutting-edge features | Production apps, complex reasoning | $$ - $$$$ |
+| **Anthropic** | Strong reasoning, long context | Document analysis, research | $$ - $$$$ |
+| **Google** | Multimodal, large context windows | Vision tasks, audio processing | $$ - $$$ |
+| **Ollama** | Free, local deployment, privacy | Development, offline apps | Free |
+| **OpenRouter** | Access to 100+ models, fallbacks | Multi-model routing, cost optimization | $ - $$$ |
+| **DeepSeek** | Cost-effective, good performance | Budget-conscious production | $ - $$ |
+| **Bedrock** | Enterprise features, AWS integration | Enterprise deployments | $$ - $$$ |
+
+## Quick Comparison
+
+### Best for Production
+- **OpenAI**: Industry-leading models with extensive tooling
+- **Anthropic**: Strong safety guarantees and reliability
+- **Bedrock**: Enterprise compliance and AWS ecosystem
+
+### Best for Development
+- **Ollama**: Free local testing with popular open-source models
+- **OpenRouter**: Test multiple providers without managing API keys
+
+### Best for Cost
+- **DeepSeek**: Competitive pricing with good quality
+- **OpenRouter**: Route to cheapest provider for each request
+- **Ollama**: Completely free for local deployment
+
+### Best for Specific Features
+- **Vision**: Google (Gemini), OpenAI (GPT-4o)
+- **Long Context**: Google (1M tokens), Anthropic (200K tokens)
+- **Reasoning**: OpenAI (o-series), Anthropic (Claude Opus)
+- **Code Generation**: OpenAI (GPT-5 Codex), DeepSeek
+
+## Common Usage Patterns
+
+### Multi-Provider Strategy
+
+```kotlin
+val productionExecutor = simpleOpenAIExecutor(
+    apiKey = System.getenv("OPENAI_API_KEY"),
+    model = OpenAIModels.Chat.GPT4o
+)
+
+val devExecutor = simpleOllamaExecutor(
+    baseUrl = "http://localhost:11434",
+    model = OllamaModels.Meta.LLAMA_3_2
+)
+
+val executor = if (inProduction) productionExecutor else devExecutor
+```
+
+### Fallback Chain with OpenRouter
+
+```kotlin
+val executor = simpleOpenRouterExecutor(
+    apiKey = System.getenv("OPENROUTER_API_KEY"),
+    model = LLModel(
+        provider = LLMProvider.OpenRouter,
+        id = "anthropic/claude-3.5-sonnet"
+    ),
+    params = OpenRouterParams(
+        // Fallback to cheaper model on failure
+        models = listOf(
+            "anthropic/claude-3.5-sonnet",
+            "anthropic/claude-3-haiku"
+        )
+    )
+)
+```
+
+## Provider Selection Guide
+
+### Choose OpenAI if:
+- You need the most capable models available
+- You require advanced features (function calling, structured outputs)
+- You're building a production application with budget for API costs
+- You need extensive documentation and community support
+
+### Choose Anthropic if:
+- Long context windows are critical (200K tokens)
+- You need strong reasoning and analysis capabilities
+- Safety and refusal behavior are important
+- Document processing is a primary use case
+
+### Choose Google if:
+- You need multimodal capabilities (vision, audio)
+- Very long context is required (1M tokens)
+- You want to process videos or images
+- You're already in the Google Cloud ecosystem
+
+### Choose Ollama if:
+- You're developing locally without API costs
+- Privacy and data sovereignty are critical
+- You need offline capability
+- You want to experiment with open-source models
+
+### Choose OpenRouter if:
+- You want access to many providers through one API
+- You need automatic failover between providers
+- Cost optimization across providers is important
+- You want to experiment without multiple API keys
+
+### Choose DeepSeek if:
+- Budget is a primary constraint
+- You need good performance at lower cost
+- Code generation is a primary use case
+- You want an alternative to major providers
+
+### Choose Bedrock if:
+- You need enterprise compliance (HIPAA, SOC2)
+- You're already using AWS services
+- You require AWS Guardrails for content filtering
+- Multiple model families with consistent API appeal to you
+
+## Feature Support Matrix
+
+| Feature | OpenAI | Anthropic | Google | Ollama | OpenRouter | DeepSeek | Bedrock |
+|---------|--------|-----------|--------|--------|------------|----------|----------|
+| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Structured Output** | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Vision** | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
+| **Streaming** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Embeddings** | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ |
+| **Moderation** | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ |
+| **Audio** | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Max Context** | 400K | 200K | 1M | Varies | Varies | 32K | Varies |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="OpenAI" icon="brain" href="/llm-providers/openai">
+    Industry-leading models with extensive capabilities
+  </Card>
+  <Card title="Anthropic" icon="messages" href="/llm-providers/anthropic">
+    Strong reasoning and long context windows
+  </Card>
+  <Card title="Google" icon="google" href="/llm-providers/google">
+    Multimodal models with massive context
+  </Card>
+  <Card title="Ollama" icon="server" href="/llm-providers/ollama">
+    Free local deployment for development
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
+  <Card title="OpenRouter" icon="route" href="/llm-providers/openrouter">
+    Access 100+ models through one API
+  </Card>
+  <Card title="DeepSeek" icon="dollar" href="/llm-providers/deepseek">
+    Cost-effective AI with good performance
+  </Card>
+  <Card title="Bedrock" icon="aws" href="/llm-providers/bedrock">
+    Enterprise AI on AWS infrastructure
+  </Card>
+</CardGroup>
