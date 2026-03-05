@@ -160,7 +160,9 @@ class MyVectorStorage : RetrievalStorage, IngestionStorage {
         namespace: String?
     ): List<MemoryRecord> {
         // Implement vector similarity search
-        TODO()
+        // Example: Query your vector database (Pinecone, Weaviate, etc.)
+        // and return matching memory records
+        return emptyList() // Replace with actual implementation
     }
     
     override suspend fun add(
@@ -168,7 +170,8 @@ class MyVectorStorage : RetrievalStorage, IngestionStorage {
         namespace: String?
     ) {
         // Persist records with embeddings
-        TODO()
+        // Example: Generate embeddings and store in vector database
+        // records.forEach { record -> vectorDB.insert(record, namespace) }
     }
 }
 ```

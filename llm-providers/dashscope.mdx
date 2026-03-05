@@ -1,0 +1,528 @@
+---
+title: DashScope Provider
+description: Alibaba Cloud's Qwen models with 1M token context and multimodal capabilities
+---
+
+DashScope provides access to Alibaba Cloud's Qwen family of models, featuring impressive 1M token context windows, multimodal support (text, image, video, audio), and specialized coding models.
+
+## Installation
+
+The DashScope client is included in the core Koog library. No additional dependencies required.
+
+## Quick Start
+
+```kotlin
+import ai.koog.prompt.executor.clients.dashscope.*
+import ai.koog.agents.core.*
+
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY")
+)
+
+val executor = SingleLLMPromptExecutor(client)
+
+val agent = AIAgent(
+    executor = executor,
+    llmModel = DashscopeModels.QWEN_PLUS,
+    tools = toolRegistry {
+        // Your tools here
+    }
+) {
+    // Define your agent strategy
+}
+
+val result = agent.execute("Analyze this document...")
+```
+
+## Authentication
+
+### API Key Setup
+
+Get your API key from [Alibaba Cloud DashScope](https://dashscope.console.aliyun.com/).
+
+```bash
+export DASHSCOPE_API_KEY=sk-...
+```
+
+### Programmatic Configuration
+
+```kotlin
+// International endpoint (default)
+val client = DashscopeLLMClient(
+    apiKey = "sk-...",
+    settings = DashscopeClientSettings(
+        baseUrl = "https://dashscope-intl.aliyuncs.com/",
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 120_000
+        )
+    )
+)
+
+// China mainland endpoint
+val clientChina = DashscopeLLMClient(
+    apiKey = "sk-...",
+    settings = DashscopeClientSettings(
+        baseUrl = "https://dashscope.aliyuncs.com/"
+    )
+)
+```
+
+## Available Models
+
+### General Chat Models
+
+High-performance models for general tasks.
+
+```kotlin
+DashscopeModels.QWEN_FLASH           // 1M context, high-speed
+DashscopeModels.QWEN_PLUS            // 1M context, balanced
+DashscopeModels.QWEN_PLUS_LATEST     // 1M context, auto-updated
+DashscopeModels.QWEN3_MAX            // 262K context, most capable
+```
+
+**Qwen Flash**
+- 1,000,000 token context
+- 32,768 max output tokens
+- Optimized for speed
+- Tools and temperature control
+
+**Qwen Plus** (Qwen3 series)
+- 1,000,000 token context
+- 32,768 max output tokens
+- Balanced performance and capabilities
+- Tools, speculation, structured JSON
+- Multiple choice generation
+
+**Qwen Plus Latest** (Auto-updating)
+- Always points to newest Qwen Plus
+- Same capabilities as Qwen Plus
+- Automatic updates to latest version
+
+**Qwen3 Max** (Most Capable)
+- 262,144 token context
+- 65,536 max output tokens
+- Advanced reasoning
+- Tools, speculation, structured JSON
+
+### Multimodal Models
+
+Models with vision, audio, and video support.
+
+```kotlin
+DashscopeModels.QWEN3_OMNI_FLASH     // Low-latency omni model
+```
+
+**Qwen3 Omni Flash**
+- 65,536 token context
+- 16,384 max output tokens
+- Text, image, video, and audio I/O
+- Audio/video chat
+- Visual recognition
+- Multilingual speech interactions
+
+### Coding Models
+
+Specialized models for code generation and software engineering.
+
+```kotlin
+DashscopeModels.QWEN3_CODER_PLUS     // 1M context, coding agent
+DashscopeModels.QWEN3_CODER_FLASH    // 1M context, fast coding
+```
+
+**Qwen3 Coder Plus**
+- 1,000,000 token context
+- 65,536 max output tokens
+- Coding agent capabilities
+- Tool use and environment interaction
+- Retains general abilities
+- Structured JSON outputs
+
+**Qwen3 Coder Flash**
+- 1,000,000 token context
+- 32,768 max output tokens
+- High-speed code generation
+- Low-latency responses
+- Tool calling
+
+## Code Examples
+
+### Basic Chat Completion
+
+```kotlin
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY")
+)
+
+val executor = SingleLLMPromptExecutor(client)
+
+val result = executor.execute(
+    model = DashscopeModels.QWEN_PLUS,
+    prompt = prompt {
+        system("You are a helpful AI assistant.")
+        user("Explain machine learning in simple terms.")
+    }
+)
+
+println(result.first().content)
+```
+
+### Long Context Processing
+
+Leverage the 1M token context for processing large documents:
+
+```kotlin
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY")
+)
+
+val executor = SingleLLMPromptExecutor(client)
+
+val largeDocument = File("large_codebase.txt").readText() // Can be very large
+
+val result = executor.execute(
+    model = DashscopeModels.QWEN_PLUS,
+    prompt = prompt {
+        system("You are analyzing a large codebase.")
+        user("Document: $largeDocument\n\nQuestion: What are the main components?")
+    }
+)
+```
+
+### Function Calling
+
+```kotlin
+data class SearchArgs(val query: String, val scope: String)
+
+val searchTool = tool<SearchArgs, String>(
+    name = "web_search",
+    description = "Search the web for information"
+) { args ->
+    "Search results for ${args.query} in ${args.scope}"
+}
+
+val agent = AIAgent(
+    executor = SingleLLMPromptExecutor(
+        DashscopeLLMClient(System.getenv("DASHSCOPE_API_KEY"))
+    ),
+    llmModel = DashscopeModels.QWEN_PLUS,
+    tools = toolRegistry { tool(searchTool) }
+) {
+    defineGraph<String, String>("search-agent") {
+        val response = callLLM()
+        finish(response)
+    }
+}
+
+val result = agent.execute("Find recent AI research papers")
+```
+
+### Code Generation
+
+```kotlin
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY")
+)
+
+val executor = SingleLLMPromptExecutor(client)
+
+val result = executor.execute(
+    model = DashscopeModels.QWEN3_CODER_PLUS,
+    prompt = prompt {
+        user("Write a Kotlin function to calculate fibonacci numbers recursively")
+    }
+)
+
+println(result.first().content)
+```
+
+### Structured Output
+
+```kotlin
+@Serializable
+data class Analysis(
+    val summary: String,
+    val keyPoints: List<String>,
+    val sentiment: String
+)
+
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY")
+)
+
+val executor = SingleLLMPromptExecutor(client)
+
+val result = executor.execute(
+    model = DashscopeModels.QWEN_PLUS,
+    params = DashscopeParams(
+        schema = LLMParams.Schema.JSON.Standard(
+            name = "Analysis",
+            schema = /* JSON schema */
+        )
+    ),
+    prompt = prompt {
+        user("Analyze this text: The AI revolution is transforming industries...")
+    }
+)
+
+val analysis = Json.decodeFromString<Analysis>(result.first().content)
+```
+
+### Vision - Image Analysis
+
+```kotlin
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY")
+)
+
+val executor = SingleLLMPromptExecutor(client)
+
+val result = executor.execute(
+    model = DashscopeModels.QWEN3_OMNI_FLASH,
+    prompt = prompt {
+        user {
+            text("What's in this image?")
+            image(
+                url = "https://example.com/photo.jpg"
+                // or: bytes = imageBytes
+            )
+        }
+    }
+)
+```
+
+### Video Processing
+
+```kotlin
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY")
+)
+
+val executor = SingleLLMPromptExecutor(client)
+
+val result = executor.execute(
+    model = DashscopeModels.QWEN3_OMNI_FLASH,
+    prompt = prompt {
+        user {
+            text("Describe what happens in this video")
+            video(
+                url = "https://example.com/video.mp4"
+            )
+        }
+    }
+)
+```
+
+### Streaming Responses
+
+```kotlin
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY")
+)
+
+val executor = SingleLLMPromptExecutor(client)
+
+executor.executeStreaming(
+    model = DashscopeModels.QWEN_PLUS,
+    prompt = prompt { user("Write a detailed essay...") }
+).collect { frame ->
+    when (frame) {
+        is StreamFrame.TextDelta -> print(frame.text)
+        is StreamFrame.End -> println("\nComplete")
+        else -> {}
+    }
+}
+```
+
+## Advanced Configuration
+
+### Custom Parameters
+
+```kotlin
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY")
+)
+
+val executor = SingleLLMPromptExecutor(client)
+
+executor.execute(
+    model = DashscopeModels.QWEN_PLUS,
+    params = DashscopeParams(
+        temperature = 0.7,
+        maxTokens = 8192,
+        topP = 0.9,
+        presencePenalty = 0.5,
+        frequencyPenalty = 0.5,
+        enableSearch = true, // Enable web search
+        enableThinking = true, // Enable reasoning display
+        parallelToolCalls = true
+    ),
+    prompt = prompt { user("Research recent developments in AI") }
+)
+```
+
+### Web Search Integration
+
+Enable real-time web search for up-to-date information:
+
+```kotlin
+executor.execute(
+    model = DashscopeModels.QWEN_PLUS,
+    params = DashscopeParams(
+        enableSearch = true
+    ),
+    prompt = prompt { user("What are today's news headlines?") }
+)
+```
+
+### Reasoning Display
+
+Show the model's thinking process:
+
+```kotlin
+executor.execute(
+    model = DashscopeModels.QWEN3_MAX,
+    params = DashscopeParams(
+        enableThinking = true
+    ),
+    prompt = prompt { user("Solve this complex problem step by step...") }
+)
+```
+
+### Tool Choice Control
+
+```kotlin
+executor.execute(
+    model = DashscopeModels.QWEN_PLUS,
+    params = DashscopeParams(
+        toolChoice = LLMParams.ToolChoice.Required // Auto, None, Required, Named
+    ),
+    prompt = prompt { user("Search for information") }
+)
+```
+
+## Model Capabilities
+
+| Model | Context | Output | Vision | Audio/Video | Tools | Structured JSON |
+|-------|---------|--------|--------|-------------|-------|-----------------|
+| Qwen Flash | 1M | 32K | ❌ | ❌ | ✅ | ❌ |
+| Qwen Plus | 1M | 32K | ❌ | ❌ | ✅ | ✅ |
+| Qwen Plus Latest | 1M | 32K | ❌ | ❌ | ✅ | ✅ |
+| Qwen3 Max | 262K | 65K | ❌ | ❌ | ✅ | ✅ |
+| Qwen3 Omni Flash | 65K | 16K | ✅ | ✅ | ✅ | ❌ |
+| Qwen3 Coder Plus | 1M | 65K | ❌ | ❌ | ✅ | ✅ |
+| Qwen3 Coder Flash | 1M | 32K | ❌ | ❌ | ✅ | ❌ |
+
+## Pricing
+
+Pricing varies by model and region. See [Alibaba Cloud Pricing](https://www.alibabacloud.com/help/en/dashscope/pricing) for current rates.
+
+## Best Practices
+
+1. **Use Qwen Plus** for most tasks - excellent balance of capability and performance
+2. **Use Qwen Flash** for high-throughput, latency-sensitive applications
+3. **Use Qwen3 Max** for complex reasoning requiring advanced capabilities
+4. **Use Qwen3 Coder Plus** for software engineering and coding agents
+5. **Leverage 1M context** for processing entire codebases or large documents
+6. **Use Qwen3 Omni Flash** for multimodal applications with audio/video
+7. **Enable search** for real-time information retrieval
+8. **Use Qwen Plus Latest** to automatically benefit from model improvements
+
+## Use Cases
+
+<AccordionGroup>
+  <Accordion title="Large Document Analysis">
+    Use **Qwen Plus** or **Qwen3 Coder Plus** with 1M token context to process entire books, codebases, or datasets in a single request.
+  </Accordion>
+  
+  <Accordion title="Software Engineering">
+    Use **Qwen3 Coder Plus** for coding agents that can see and understand entire projects, perform multi-file edits, and assist with complex refactoring.
+  </Accordion>
+  
+  <Accordion title="Multimodal Applications">
+    Use **Qwen3 Omni Flash** for applications requiring text, image, video, and audio understanding - perfect for content analysis and interactive chat.
+  </Accordion>
+  
+  <Accordion title="Real-time Information">
+    Use **Qwen Plus** with `enableSearch = true` for applications requiring up-to-date information from the web.
+  </Accordion>
+  
+  <Accordion title="High-Throughput Systems">
+    Use **Qwen Flash** or **Qwen3 Coder Flash** for applications requiring fast responses with minimal latency.
+  </Accordion>
+  
+  <Accordion title="Complex Reasoning">
+    Use **Qwen3 Max** with `enableThinking = true` for problems requiring advanced reasoning and step-by-step analysis.
+  </Accordion>
+</AccordionGroup>
+
+## Limitations
+
+- **No embeddings API**: Use OpenAI or other providers for embeddings
+- **No moderation API**: Implement custom content filtering
+- **Regional availability**: Some features may vary between international and China endpoints
+- **Model availability**: Some models may require specific API access levels
+
+## Troubleshooting
+
+### Rate Limits
+
+```kotlin
+val client = DashscopeLLMClient(
+    apiKey = System.getenv("DASHSCOPE_API_KEY"),
+    settings = DashscopeClientSettings(
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 300_000 // 5 minutes for large context
+        )
+    )
+)
+```
+
+### Endpoint Selection
+
+```kotlin
+// If experiencing connectivity issues, try the appropriate endpoint:
+
+// International users
+val clientIntl = DashscopeLLMClient(
+    apiKey = apiKey,
+    settings = DashscopeClientSettings(
+        baseUrl = "https://dashscope-intl.aliyuncs.com/"
+    )
+)
+
+// China mainland users
+val clientChina = DashscopeLLMClient(
+    apiKey = apiKey,
+    settings = DashscopeClientSettings(
+        baseUrl = "https://dashscope.aliyuncs.com/"
+    )
+)
+```
+
+### Error Handling
+
+```kotlin
+try {
+    val result = executor.execute(
+        model = DashscopeModels.QWEN_PLUS,
+        prompt = prompt { user("Hello") }
+    )
+} catch (e: LLMClientException) {
+    when {
+        e.message?.contains("rate_limit") == true -> {
+            // Handle rate limiting
+        }
+        e.message?.contains("invalid_api_key") == true -> {
+            // Check API key configuration
+        }
+        else -> throw e
+    }
+}
+```
+
+## Resources
+
+- [DashScope Documentation](https://www.alibabacloud.com/help/en/dashscope/)
+- [Qwen Models Overview](https://www.alibabacloud.com/help/en/dashscope/qwen-model-overview)
+- [API Reference](https://www.alibabacloud.com/help/en/dashscope/developer-reference/api-reference)
+- [DashScope Console](https://dashscope.console.aliyun.com/)

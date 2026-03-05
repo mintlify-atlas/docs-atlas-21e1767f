@@ -68,6 +68,8 @@
               "llm-providers/ollama",
               "llm-providers/openrouter",
               "llm-providers/deepseek",
+              "llm-providers/dashscope",
+              "llm-providers/mistralai",
               "llm-providers/bedrock"
             ]
           },

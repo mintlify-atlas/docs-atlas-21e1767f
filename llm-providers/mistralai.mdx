@@ -1,0 +1,477 @@
+---
+title: Mistral AI Provider
+description: Advanced AI models with multimodal capabilities, vision, and specialized coding models
+---
+
+Mistral AI provides frontier-class language models with strong performance in reasoning, coding, and multimodal tasks. Models include vision support, document processing, and specialized coding capabilities.
+
+## Installation
+
+The Mistral AI client is included in the core Koog library. No additional dependencies required.
+
+## Quick Start
+
+```kotlin
+import ai.koog.prompt.executor.clients.mistralai.*
+import ai.koog.agents.core.*
+
+val executor = simpleMistralAIExecutor(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+val agent = AIAgent(
+    executor = executor,
+    llmModel = MistralAIModels.Chat.MistralLarge21,
+    tools = toolRegistry {
+        // Your tools here
+    }
+) {
+    // Define your agent strategy
+}
+
+val result = agent.execute("Analyze this codebase...")
+```
+
+## Authentication
+
+### API Key Setup
+
+Get your API key from [Mistral AI Platform](https://console.mistral.ai/).
+
+```bash
+export MISTRAL_API_KEY=...
+```
+
+### Programmatic Configuration
+
+```kotlin
+val client = MistralAILLMClient(
+    apiKey = "...",
+    settings = MistralAIClientSettings(
+        baseUrl = "https://api.mistral.ai",
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 120_000
+        )
+    )
+)
+```
+
+## Available Models
+
+### Chat Models
+
+General-purpose conversation and reasoning models.
+
+```kotlin
+MistralAIModels.Chat.MistralMedium31     // 128K context, multimodal
+MistralAIModels.Chat.MistralLarge21      // 128K context, top-tier reasoning
+MistralAIModels.Chat.MistralSmall2       // 32K context, efficient
+```
+
+**Mistral Medium 3.1** (Premier)
+- 128K context window
+- Multimodal: vision, images, documents
+- Tools and function calling
+- Structured JSON outputs
+
+**Mistral Large 2.1** (Premier)
+- 128K context window
+- Most capable for complex reasoning
+- Tools and function calling
+- Structured JSON outputs
+
+**Mistral Small 2** (Premier)
+- 32K context window
+- Efficient for standard tasks
+- Tools and function calling
+
+### Reasoning Models
+
+Advanced models with extended reasoning capabilities.
+
+```kotlin
+MistralAIModels.Chat.MagistralMedium12   // 128K context, frontier reasoning + vision
+```
+
+**Magistral Medium 1.2** (Premier)
+- 128K context window
+- Advanced reasoning with speculation
+- Vision and document processing
+- Structured JSON outputs
+
+### Coding Models
+
+Specialized models optimized for software engineering tasks.
+
+```kotlin
+MistralAIModels.Chat.Codestral           // 256K context, low-latency coding
+MistralAIModels.Chat.DevstralMedium      // 128K context, enterprise coding
+```
+
+**Codestral 2508** (Premier)
+- 256K context window
+- Fill-in-the-middle, code completion
+- Code correction and test generation
+- Low-latency responses
+
+**Devstral Medium** (Premier)
+- 128K context window
+- Codebase exploration and editing
+- Multi-file editing
+- Software engineering agents
+
+### Embedding Models
+
+Vector embeddings for semantic search and RAG.
+
+```kotlin
+MistralAIModels.Embeddings.MistralEmbed      // 8K context, text embeddings
+MistralAIModels.Embeddings.CodestralEmbed    // 8K context, code embeddings
+```
+
+### Moderation Model
+
+Content safety and harmful content detection.
+
+```kotlin
+MistralAIModels.Moderation.MistralModeration // 8K context, safety checks
+```
+
+## Code Examples
+
+### Basic Chat Completion
+
+```kotlin
+val executor = simpleMistralAIExecutor(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+val result = executor.execute(
+    model = MistralAIModels.Chat.MistralLarge21,
+    prompt = prompt {
+        system("You are a helpful AI assistant.")
+        user("Explain quantum entanglement.")
+    }
+)
+
+println(result.first().content)
+```
+
+### Function Calling
+
+```kotlin
+data class CodeAnalysisArgs(val code: String, val language: String)
+
+val analysisTool = tool<CodeAnalysisArgs, String>(
+    name = "analyze_code",
+    description = "Analyze code quality and suggest improvements"
+) { args ->
+    "Analysis for ${args.language}: ${args.code.length} chars"
+}
+
+val agent = AIAgent(
+    executor = simpleMistralAIExecutor(
+        apiKey = System.getenv("MISTRAL_API_KEY")
+    ),
+    llmModel = MistralAIModels.Chat.Codestral,
+    tools = toolRegistry { tool(analysisTool) }
+) {
+    defineGraph<String, String>("code-agent") {
+        val response = callLLM()
+        finish(response)
+    }
+}
+
+val result = agent.execute("Analyze this Python function: def add(a, b): return a + b")
+```
+
+### Vision - Image Analysis
+
+```kotlin
+val executor = simpleMistralAIExecutor(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+val result = executor.execute(
+    model = MistralAIModels.Chat.MistralMedium31,
+    prompt = prompt {
+        user {
+            text("What's in this image?")
+            image(
+                url = "https://example.com/diagram.png"
+                // or: bytes = imageBytes
+            )
+        }
+    }
+)
+```
+
+### Document Processing
+
+```kotlin
+val executor = simpleMistralAIExecutor(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+val result = executor.execute(
+    model = MistralAIModels.Chat.MagistralMedium12,
+    prompt = prompt {
+        user {
+            text("Summarize this document")
+            file(
+                bytes = pdfBytes,
+                mimeType = "application/pdf",
+                fileName = "report.pdf"
+            )
+        }
+    }
+)
+```
+
+### Structured Output
+
+```kotlin
+@Serializable
+data class CodeReview(
+    val issues: List<String>,
+    val suggestions: List<String>,
+    val rating: Int
+)
+
+val executor = simpleMistralAIExecutor(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+val result = executor.execute(
+    model = MistralAIModels.Chat.Codestral,
+    params = MistralAIParams(
+        schema = LLMParams.Schema.JSON.Standard(
+            name = "CodeReview",
+            schema = /* JSON schema */
+        )
+    ),
+    prompt = prompt {
+        user("Review this code: fun add(a: Int, b: Int) = a + b")
+    }
+)
+
+val review = Json.decodeFromString<CodeReview>(result.first().content)
+```
+
+### Embeddings
+
+```kotlin
+val client = MistralAILLMClient(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+val embedding = client.embed(
+    text = "Kotlin is a modern programming language",
+    model = MistralAIModels.Embeddings.MistralEmbed
+)
+
+println("Embedding dimensions: ${embedding.size}") // 1024
+```
+
+### Code Embeddings
+
+```kotlin
+val client = MistralAILLMClient(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+val codeEmbedding = client.embed(
+    text = "fun factorial(n: Int): Int = if (n <= 1) 1 else n * factorial(n - 1)",
+    model = MistralAIModels.Embeddings.CodestralEmbed
+)
+```
+
+### Content Moderation
+
+```kotlin
+val client = MistralAILLMClient(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+val result = client.moderate(
+    prompt = prompt { user("Some potentially harmful content") },
+    model = MistralAIModels.Moderation.MistralModeration
+)
+
+if (result.isHarmful) {
+    println("Content flagged: ${result.categories}")
+}
+```
+
+### Streaming Responses
+
+```kotlin
+val executor = simpleMistralAIExecutor(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+executor.executeStreaming(
+    model = MistralAIModels.Chat.MistralLarge21,
+    prompt = prompt { user("Write a detailed technical explanation...") }
+).collect { frame ->
+    when (frame) {
+        is StreamFrame.TextDelta -> print(frame.text)
+        is StreamFrame.End -> println("\nComplete")
+        else -> {}
+    }
+}
+```
+
+## Advanced Configuration
+
+### Custom Parameters
+
+```kotlin
+val executor = simpleMistralAIExecutor(
+    apiKey = System.getenv("MISTRAL_API_KEY")
+)
+
+executor.execute(
+    model = MistralAIModels.Chat.MistralLarge21,
+    params = MistralAIParams(
+        temperature = 0.7,
+        maxTokens = 4096,
+        topP = 0.9,
+        randomSeed = 42,
+        presencePenalty = 0.5,
+        frequencyPenalty = 0.5,
+        safePrompt = true, // Enable content safety
+        parallelToolCalls = true
+    ),
+    prompt = prompt { user("Generate creative content") }
+)
+```
+
+### Speculation (Predictive Decoding)
+
+Use speculation for faster generation when output is predictable:
+
+```kotlin
+executor.execute(
+    model = MistralAIModels.Chat.MagistralMedium12,
+    params = MistralAIParams(
+        speculation = "Expected pattern to predict"
+    ),
+    prompt = prompt { user("Complete this sentence: The capital of France is") }
+)
+```
+
+### Tool Choice Control
+
+```kotlin
+executor.execute(
+    model = MistralAIModels.Chat.MistralLarge21,
+    params = MistralAIParams(
+        toolChoice = LLMParams.ToolChoice.Required // Auto, None, Required, Named
+    ),
+    prompt = prompt { user("Search for information") }
+)
+```
+
+## Model Capabilities
+
+| Model | Context | Vision | Docs | Tools | Embeddings | Moderation |
+|-------|---------|--------|------|-------|------------|------------|
+| Mistral Medium 3.1 | 128K | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Mistral Large 2.1 | 128K | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Mistral Small 2 | 32K | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Magistral Medium 1.2 | 128K | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Codestral | 256K | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Devstral Medium | 128K | ❌ | ✅ | ✅ | ❌ | ❌ |
+| Mistral Embed | 8K | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Codestral Embed | 8K | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Mistral Moderation | 8K | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+## Pricing
+
+Pricing varies by model. See [Mistral AI Pricing](https://mistral.ai/technology/#pricing) for current rates.
+
+**Model Tiers:**
+- **Premier Models**: Mistral Medium 3.1, Large 2.1, Small 2, Magistral Medium 1.2, Codestral, Devstral Medium
+- All premier models require API access and have usage-based pricing
+
+## Best Practices
+
+1. **Use Mistral Large 2.1** for complex reasoning and high-stakes tasks
+2. **Use Codestral** for code completion, fill-in-the-middle, and low-latency coding
+3. **Use Devstral Medium** for codebase exploration and multi-file editing
+4. **Use Mistral Medium 3.1** for multimodal tasks with vision
+5. **Enable safe prompt** for user-facing applications
+6. **Use Codestral Embed** for code search and semantic code analysis
+7. **Leverage 256K context** in Codestral for large codebase analysis
+
+## Use Cases
+
+<AccordionGroup>
+  <Accordion title="Software Engineering Agents">
+    Use **Devstral Medium** or **Codestral** for building agents that explore codebases, edit multiple files, and assist with software development tasks.
+  </Accordion>
+  
+  <Accordion title="Code Generation">
+    Use **Codestral** for low-latency code completion, fill-in-the-middle, test generation, and code corrections.
+  </Accordion>
+  
+  <Accordion title="Multimodal Analysis">
+    Use **Mistral Medium 3.1** or **Magistral Medium 1.2** for processing images, documents, and mixed-content analysis.
+  </Accordion>
+  
+  <Accordion title="Complex Reasoning">
+    Use **Mistral Large 2.1** or **Magistral Medium 1.2** for tasks requiring advanced reasoning and problem-solving.
+  </Accordion>
+  
+  <Accordion title="Code Search & RAG">
+    Use **Codestral Embed** for semantic code search, code similarity, and RAG applications with code.
+  </Accordion>
+  
+  <Accordion title="Content Safety">
+    Use **Mistral Moderation** to detect and filter harmful content in user inputs.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### Rate Limits
+
+```kotlin
+val client = MistralAILLMClient(
+    apiKey = System.getenv("MISTRAL_API_KEY"),
+    settings = MistralAIClientSettings(
+        timeoutConfig = ConnectionTimeoutConfig(
+            requestTimeoutMillis = 180_000 // 3 minutes for large requests
+        )
+    )
+)
+```
+
+### Error Handling
+
+```kotlin
+try {
+    val result = executor.execute(
+        model = MistralAIModels.Chat.MistralLarge21,
+        prompt = prompt { user("Hello") }
+    )
+} catch (e: LLMClientException) {
+    when {
+        e.message?.contains("rate_limit") == true -> {
+            // Handle rate limiting
+        }
+        e.message?.contains("invalid_request") == true -> {
+            // Check request format
+        }
+        else -> throw e
+    }
+}
+```
+
+## Resources
+
+- [Mistral AI Documentation](https://docs.mistral.ai/)
+- [Model Overview](https://docs.mistral.ai/models/)
+- [API Reference](https://docs.mistral.ai/api/)
+- [Mistral AI Platform](https://console.mistral.ai/)
